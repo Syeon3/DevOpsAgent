@@ -1,0 +1,1133 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 1rem;
+  /* Light Mode - Modern Tech Console Theme */
+
+  /* Background layers */
+  --background: oklch(0.98 0.005 250);
+  /* #F8FAFC - Soft blue-white */
+  --background-elevated: oklch(0.96 0.008 250);
+  /* #F1F5F9 - Elevated surface */
+
+  --foreground: oklch(0.13 0.02 250);
+  /* #0F172A - Deep slate */
+  --card: oklch(1 0 0);
+  /* #FFFFFF - Pure white cards */
+  --card-foreground: oklch(0.13 0.02 250);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.13 0.02 250);
+
+  /* Primary - Tech Blue */
+  --primary: oklch(0.55 0.22 250);
+  /* #2563EB - Vibrant blue */
+  --primary-foreground: oklch(0.99 0 0);
+
+  /* Accent - Cyan glow */
+  --accent: oklch(0.72 0.15 200);
+  /* #38BDF8 - Sky blue */
+  --accent-foreground: oklch(0.13 0.02 250);
+
+  /* Warm colors - For CTA and highlights only */
+  --warm: oklch(0.72 0.18 50);
+  /* #FF9F45 - Warm orange */
+  --warm-soft: oklch(0.85 0.15 75);
+  /* #FFD166 - Soft gold */
+  --warm-foreground: oklch(0.13 0.02 250);
+
+  --secondary: oklch(0.96 0.008 250);
+  --secondary-foreground: oklch(0.13 0.02 250);
+  --muted: oklch(0.96 0.008 250);
+  --muted-foreground: oklch(0.48 0.01 250);
+  /* #64748B - Slate 500 */
+
+  --destructive: oklch(0.58 0.22 25);
+  --border: oklch(0.90 0.01 250);
+  /* Soft border */
+  --input: oklch(0.90 0.01 250);
+  --ring: oklch(0.55 0.22 250);
+
+  /* Sidebar */
+  --sidebar: oklch(0.98 0.005 250);
+  --sidebar-foreground: oklch(0.13 0.02 250);
+  --sidebar-primary: oklch(0.55 0.22 250);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.94 0.02 250);
+  --sidebar-accent-foreground: oklch(0.13 0.02 250);
+  --sidebar-border: oklch(0.90 0.01 250);
+  --sidebar-ring: oklch(0.55 0.22 250);
+
+  /* Chat bubble colors */
+  --ai-bubble: oklch(0.96 0.008 250);
+  /* Soft AI bubble */
+  --user-bubble: oklch(0.55 0.22 250);
+  /* Blue user bubble */
+  --user-bubble-foreground: oklch(0.99 0 0);
+
+  /* Brand accent */
+  --brand-accent: oklch(0.72 0.18 50);
+  /* Warm orange for brand */
+
+  /* Text dim - for placeholder and secondary text */
+  --text-dim: oklch(0.55 0.01 250);
+  /* Gray placeholder text */
+  --text-main: oklch(0.25 0.02 250);
+  /* Main text color */
+
+  /* Switch checked - Warm accent */
+  --switch-checked: oklch(0.72 0.18 50);
+
+  /* Glow effects */
+  --glow-primary: 0 0 20px oklch(0.55 0.22 250 / 0.3);
+  --glow-warm: 0 0 20px oklch(0.72 0.18 50 / 0.4);
+  --glow-accent: 0 0 15px oklch(0.72 0.15 200 / 0.3);
+
+  /* Token stats - Light theme (Cost analysis palette) */
+  /* Input tokens - Blue: Request scale (source) */
+  --token-input: #3B82F6;
+  --token-input-bg: rgba(59, 130, 246, 0.12);
+  --token-input-glow: 0 0 8px rgba(59, 130, 246, 0.35);
+
+  /* Output tokens - Indigo: Generation scale (result) */
+  --token-output: #8B5CF6;
+  --token-output-bg: rgba(139, 92, 246, 0.12);
+  --token-output-glow: 0 0 8px rgba(139, 92, 246, 0.35);
+
+  /* Cache tokens - Green: Savings / Optimization benefits - Strong glow highlight */
+  --token-cache: #22C55E;
+  --token-cache-bg: rgba(34, 197, 94, 0.12);
+  --token-cache-glow: 0 0 12px rgba(34, 197, 94, 0.5);
+
+  /* Reasoning tokens - Amber: Cost / Resource consumption (primary color) */
+  --token-reasoning: #F59E0B;
+  --token-reasoning-bg: rgba(245, 158, 11, 0.12);
+  --token-reasoning-glow: 0 0 10px rgba(245, 158, 11, 0.4);
+
+  --token-total: #4F46E5;
+  --token-total-bg: rgba(79, 70, 229, 0.12);
+  --token-total-glow: 0 0 10px rgba(79, 70, 229, 0.4);
+
+  --token-track: #E5E7EB;
+
+  /* DAG Colors - Light Theme */
+  --dag-bg-main: #EEF2F6;
+  --dag-bg-panel: #FFFFFF;
+  --dag-border: rgba(0, 0, 0, 0.16);
+  --dag-text-primary: #1A1A1A;
+  --dag-text-secondary: #666666;
+  --dag-text-dim: #999999;
+
+  /* Human Node - Gray Blue */
+  --dag-node-human-bg: #F1F5F9;
+  --dag-node-human-border: #94A3B8;
+  --dag-node-human-text: #475569;
+
+  /* AI Node - Blue */
+  --dag-node-ai-bg: #EFF6FF;
+  --dag-node-ai-border: #3B82F6;
+  --dag-node-ai-text: #1D4ED8;
+
+  /* AI Final Node - Green */
+  --dag-node-final-bg: #F0FDF4;
+  --dag-node-final-border: #22C55E;
+  --dag-node-final-text: #16A34A;
+
+  /* Tool Node - Purple */
+  --dag-node-tool-bg: #FAF5FF;
+  --dag-node-tool-border: #A855F7;
+  --dag-node-tool-text: #7E22CE;
+
+  /* Legacy variables for compatibility */
+  --dag-node-user: #64748B;
+  --dag-node-user-light: #F1F5F9;
+  --dag-node-user-border: #94A3B8;
+
+  --dag-node-ai: #3B82F6;
+  --dag-node-ai-light: #EFF6FF;
+  --dag-node-ai-border: #3B82F6;
+
+  --dag-node-tool: #A855F7;
+  --dag-node-tool-light: #FAF5FF;
+  --dag-node-tool-border: #A855F7;
+
+  --dag-node-subagent-from: #3B82F6;
+  --dag-node-subagent-to: #06B6D4;
+
+  --dag-success: #22C55E;
+  --dag-success-light: #F0FDF4;
+  --dag-success-border: #22C55E;
+
+  --dag-error: #EF4444;
+  --dag-error-light: #FEF2F2;
+  --dag-error-border: #EF4444;
+
+  --dag-edge: rgba(0, 0, 0, 0.25);
+
+  /* ReactFlow-specific colors */
+  --dag-rf-background: #EEF2F6;
+  --dag-rf-grid: #CBD5E1;
+  --dag-rf-controls-bg: #FFFFFF;
+  --dag-rf-controls-border: #E2E8F0;
+  --dag-rf-controls-text: #64748B;
+  --dag-rf-controls-hover-bg: #F1F5F9;
+  --dag-rf-controls-hover-text: #1E293B;
+  --dag-rf-minimap-bg: #F8FAFC;
+  --dag-rf-minimap-mask: rgba(238, 242, 246, 0.7);
+  --dag-rf-node-label: #1A1A1A;
+  --dag-rf-node-subtitle: #666666;
+
+  /* Node glow colors */
+  --dag-node-human-glow: rgba(148, 163, 184, 0.4);
+  --dag-node-ai-glow: rgba(59, 130, 246, 0.4);
+  --dag-node-final-glow: rgba(34, 197, 94, 0.4);
+  --dag-node-tool-glow: rgba(168, 85, 247, 0.4);
+}
+
+.dark {
+  /* Dark Mode - Modern Tech Console Theme */
+
+  /* Background layers */
+  --background: oklch(0.12 0.02 260);
+  /* #0B0F1A - Deep tech blue-black */
+  --background-elevated: oklch(0.15 0.02 260);
+  /* #111827 - Elevated surface */
+
+  --foreground: oklch(0.92 0.01 260);
+  /* #E6F1FF - Soft blue-white text */
+  --card: oklch(0.18 0.02 260);
+  /* #1A2238 - Card surface */
+  --card-foreground: oklch(0.92 0.01 260);
+  --popover: oklch(0.16 0.02 260);
+  --popover-foreground: oklch(0.92 0.01 260);
+
+  /* Primary - Tech Cyan */
+  --primary: oklch(0.75 0.15 195);
+  /* #00D1FF - Tech blue */
+  --primary-foreground: oklch(0.12 0.02 260);
+
+  /* Accent - Neon Cyan */
+  --accent: oklch(0.85 0.15 165);
+  /* #00FFC6 - Bright cyan */
+  --accent-foreground: oklch(0.12 0.02 260);
+
+  /* Warm colors - For CTA and highlights only */
+  --warm: oklch(0.72 0.18 50);
+  /* #FF9F45 - Warm orange */
+  --warm-soft: oklch(0.85 0.15 75);
+  /* #FFD166 - Soft gold */
+  --warm-foreground: oklch(0.12 0.02 260);
+
+  --secondary: oklch(0.22 0.02 260);
+  --secondary-foreground: oklch(0.92 0.01 260);
+  --muted: oklch(0.22 0.02 260);
+  --muted-foreground: oklch(0.65 0.02 260);
+  /* #94A3B8 - Slate 400 */
+
+  --destructive: oklch(0.65 0.20 25);
+  --border: oklch(0.30 0.03 260);
+  /* Semi-transparent tech border */
+  --input: oklch(0.25 0.02 260);
+  --ring: oklch(0.75 0.15 195);
+
+  /* Sidebar */
+  --sidebar: oklch(0.10 0.02 260);
+  /* #0B0F1A - Same as main bg */
+  --sidebar-foreground: oklch(0.92 0.01 260);
+  --sidebar-primary: oklch(0.75 0.15 195);
+  --sidebar-primary-foreground: oklch(0.12 0.02 260);
+  --sidebar-accent: oklch(0.20 0.02 260);
+  --sidebar-accent-foreground: oklch(0.92 0.01 260);
+  --sidebar-border: oklch(0.25 0.03 260);
+  --sidebar-ring: oklch(0.75 0.15 195);
+
+  /* Chat bubble colors */
+  --ai-bubble: oklch(0.20 0.02 260);
+  /* Semi-transparent AI bubble */
+  --user-bubble: oklch(0.75 0.15 195);
+  /* Tech blue user bubble */
+  --user-bubble-foreground: oklch(0.12 0.02 260);
+
+  /* Brand accent */
+  --brand-accent: oklch(0.72 0.18 50);
+  /* Warm orange for brand */
+
+  /* Text dim - for placeholder and secondary text (dark mode) */
+  --text-dim: oklch(0.55 0.02 260);
+  /* Gray placeholder text */
+  --text-main: oklch(0.92 0.01 260);
+  /* Main text color */
+
+  /* Switch checked - Warm accent */
+  --switch-checked: oklch(0.72 0.18 50);
+
+  /* Glow effects */
+  --glow-primary: 0 0 20px oklch(0.75 0.15 195 / 0.4);
+  --glow-warm: 0 0 20px oklch(0.72 0.18 50 / 0.5);
+  --glow-accent: 0 0 15px oklch(0.85 0.15 165 / 0.4);
+
+  /* Token stats - Dark theme (Sharp, high contrast) */
+  /* Input tokens - Saturated blue with sharp edges */
+  --token-input: #60A5FA;
+  --token-input-bg: rgba(96, 165, 250, 0.15);
+  --token-input-glow: none;
+
+  /* Output tokens - Saturated violet, distinct from blue */
+  --token-output: #A78BFA;
+  --token-output-bg: rgba(167, 139, 250, 0.15);
+  --token-output-glow: none;
+
+  /* Cache tokens - Green (kept for compatibility) */
+  --token-cache: #4ADE80;
+  --token-cache-bg: rgba(74, 222, 128, 0.15);
+  --token-cache-glow: 0 0 15px rgba(74, 222, 128, 0.55);
+
+  /* Reasoning tokens - Amber (kept for compatibility) */
+  --token-reasoning: #FBBF24;
+  --token-reasoning-bg: rgba(251, 191, 36, 0.15);
+  --token-reasoning-glow: 0 0 12px rgba(251, 191, 36, 0.45);
+
+  --token-total: #A5B4FC;
+  --token-total-bg: rgba(165, 180, 252, 0.20);
+  --token-total-glow: 0 0 12px rgba(165, 180, 252, 0.5);
+
+  --token-track: rgba(255, 255, 255, 0.15);
+
+  /* DAG Colors - Dark Theme */
+  --dag-bg-main: #0A0E17;
+  --dag-bg-panel: #1A2332;
+  --dag-border: rgba(255, 255, 255, 0.14);
+  --dag-text-primary: #E6EDF3;
+  --dag-text-secondary: #9FB0C3;
+  --dag-text-dim: #6B7A90;
+
+  /* Human Node - Silver Gray */
+  --dag-node-human-bg: #1E293B;
+  --dag-node-human-border: #64748B;
+  --dag-node-human-text: #CBD5E1;
+
+  /* AI Node - Blue */
+  --dag-node-ai-bg: #172554;
+  --dag-node-ai-border: #60A5FA;
+  --dag-node-ai-text: #93C5FD;
+
+  /* AI Final Node - Green */
+  --dag-node-final-bg: #052E16;
+  --dag-node-final-border: #4ADE80;
+  --dag-node-final-text: #86EFAC;
+
+  /* Tool Node - Purple */
+  --dag-node-tool-bg: #3B1D5C;
+  --dag-node-tool-border: #C084FC;
+  --dag-node-tool-text: #D8B4FE;
+
+  /* Legacy variables for compatibility */
+  --dag-node-user: #94A3B8;
+  --dag-node-user-light: #1E293B;
+  --dag-node-user-border: #64748B;
+
+  --dag-node-ai: #60A5FA;
+  --dag-node-ai-light: #172554;
+  --dag-node-ai-border: #60A5FA;
+
+  --dag-node-tool: #C084FC;
+  --dag-node-tool-light: #3B1D5C;
+  --dag-node-tool-border: #C084FC;
+
+  --dag-node-subagent-from: #60A5FA;
+  --dag-node-subagent-to: #22D3EE;
+
+  --dag-success: #4ADE80;
+  --dag-success-light: #052E16;
+  --dag-success-border: #4ADE80;
+
+  --dag-error: #F87171;
+  --dag-error-light: #450A0A;
+  --dag-error-border: #F87171;
+
+  --dag-edge: rgba(255, 255, 255, 0.25);
+
+  /* ReactFlow-specific colors */
+  --dag-rf-background: #0A0E17;
+  --dag-rf-grid: #1E293B;
+  --dag-rf-controls-bg: #1A2332;
+  --dag-rf-controls-border: #334155;
+  --dag-rf-controls-text: #94A3B8;
+  --dag-rf-controls-hover-bg: #1E293B;
+  --dag-rf-controls-hover-text: #E6EDF3;
+  --dag-rf-minimap-bg: #0F172A;
+  --dag-rf-minimap-mask: rgba(10, 14, 23, 0.8);
+  --dag-rf-node-label: #E6EDF3;
+  --dag-rf-node-subtitle: #9FB0C3;
+
+  /* Node glow colors */
+  --dag-node-human-glow: rgba(148, 163, 184, 0.5);
+  --dag-node-ai-glow: rgba(96, 165, 250, 0.5);
+  --dag-node-final-glow: rgba(74, 222, 128, 0.5);
+  --dag-node-tool-glow: rgba(192, 132, 252, 0.5);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  /* Chat bubble colors */
+  --color-ai-bubble: var(--ai-bubble);
+  --color-user-bubble: var(--user-bubble);
+  --color-user-bubble-foreground: var(--user-bubble-foreground);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    margin: 0;
+    font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Hiragino Sans GB", "WenQuanYi Micro Hei", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-weight: 450;
+    font-synthesis: weight style;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Smooth theme transition - applied to color-related properties only */
+  html.theme-transition,
+  html.theme-transition *,
+  html.theme-transition *::before,
+  html.theme-transition *::after {
+    transition: background-color 0.3s ease-out,
+      color 0.3s ease-out,
+      border-color 0.3s ease-out,
+      fill 0.3s ease-out,
+      stroke 0.3s ease-out,
+      box-shadow 0.3s ease-out !important;
+  }
+
+  /* Critical: Animate html root background immediately */
+  html {
+    transition: background-color 0.3s ease-out, color 0.3s ease-out;
+  }
+
+  /* Prevent FOUC - ensure smooth initial render */
+  html.no-transitions,
+  html.no-transitions *,
+  html.no-transitions *::before,
+  html.no-transitions *::after {
+    transition: none !important;
+  }
+}
+
+@layer components {
+  .chat-messages-scroll-area {
+    --chat-scrollbar-opacity: 0;
+    --chat-scrollbar-thumb: color-mix(in oklab, var(--color-muted-foreground) 48%, transparent);
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  .chat-messages-scroll-area::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+    background: transparent;
+  }
+
+  .chat-messages-scroll-area::-webkit-scrollbar-track,
+  .chat-messages-scroll-area::-webkit-scrollbar-corner {
+    background: transparent;
+    border: 0;
+  }
+
+  .chat-messages-scroll-area::-webkit-scrollbar-thumb {
+    border: 0;
+    border-radius: 999px;
+    background-color: var(--chat-scrollbar-thumb);
+    opacity: var(--chat-scrollbar-opacity);
+    transition: opacity 220ms ease-in-out;
+  }
+
+  /* Show scrollbar on hover */
+  .chat-messages-scroll-area:hover,
+  .chat-messages-scroll-area.is-scrolling {
+    --chat-scrollbar-opacity: 1;
+    scrollbar-color: var(--chat-scrollbar-thumb) transparent;
+  }
+
+  .chat-messages-bottom-fade {
+    background: linear-gradient(to bottom,
+        color-mix(in oklab, var(--color-background) 0%, transparent) 0%,
+        var(--color-background) 100%);
+  }
+
+  /* Sidebar scroll area */
+  .sidebar-scroll-area {
+    --sidebar-scrollbar-opacity: 0;
+    --sidebar-scrollbar-thumb: color-mix(in oklab, var(--color-sidebar-foreground) 40%, transparent);
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  .sidebar-scroll-area::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+    background: transparent;
+  }
+
+  .sidebar-scroll-area::-webkit-scrollbar-track,
+  .sidebar-scroll-area::-webkit-scrollbar-corner {
+    background: transparent;
+    border: 0;
+  }
+
+  .sidebar-scroll-area::-webkit-scrollbar-thumb {
+    border: 0;
+    border-radius: 999px;
+    background-color: var(--sidebar-scrollbar-thumb);
+    opacity: var(--sidebar-scrollbar-opacity);
+    transition: opacity 220ms ease-in-out;
+  }
+
+  /* Show scrollbar on hover */
+  .sidebar-scroll-area:hover {
+    --sidebar-scrollbar-opacity: 1;
+    scrollbar-color: var(--sidebar-scrollbar-thumb) transparent;
+  }
+
+  /* Dialog scroll area */
+  .dialog-scroll-area {
+    --dialog-scrollbar-thumb: color-mix(in oklab, var(--color-muted-foreground) 40%, transparent);
+    scrollbar-width: thin;
+    scrollbar-color: var(--dialog-scrollbar-thumb) transparent;
+  }
+
+  .dialog-scroll-area::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+    background: transparent;
+  }
+
+  .dialog-scroll-area::-webkit-scrollbar-track,
+  .dialog-scroll-area::-webkit-scrollbar-corner {
+    background: transparent;
+    border: 0;
+  }
+
+  .dialog-scroll-area::-webkit-scrollbar-thumb {
+    border: 0;
+    border-radius: 999px;
+    background-color: var(--dialog-scrollbar-thumb);
+  }
+
+  /* Process steps scroll area - refined and dark mode compatible */
+  .process-steps-scroll {
+    --process-scrollbar-thumb: color-mix(in oklab, var(--color-muted-foreground) 35%, transparent);
+    scrollbar-width: thin;
+    scrollbar-color: var(--process-scrollbar-thumb) transparent;
+  }
+
+  .process-steps-scroll::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+    background: transparent;
+  }
+
+  .process-steps-scroll::-webkit-scrollbar-track,
+  .process-steps-scroll::-webkit-scrollbar-corner {
+    background: transparent;
+    border: 0;
+  }
+
+  .process-steps-scroll::-webkit-scrollbar-thumb {
+    border: 0;
+    border-radius: 999px;
+    background-color: var(--process-scrollbar-thumb);
+  }
+
+  .process-steps-scroll:hover {
+    --process-scrollbar-thumb: color-mix(in oklab, var(--color-muted-foreground) 50%, transparent);
+    scrollbar-color: var(--process-scrollbar-thumb) transparent;
+  }
+
+  /* Step detail content scroll area - for nested scrollable areas in step details */
+  .step-detail-scroll {
+    --step-scrollbar-thumb: color-mix(in oklab, var(--color-muted-foreground) 35%, transparent);
+    scrollbar-width: thin;
+    scrollbar-color: var(--step-scrollbar-thumb) transparent;
+  }
+
+  .step-detail-scroll::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+    background: transparent;
+  }
+
+  .step-detail-scroll::-webkit-scrollbar-track,
+  .step-detail-scroll::-webkit-scrollbar-corner {
+    background: transparent;
+    border: 0;
+  }
+
+  .step-detail-scroll::-webkit-scrollbar-thumb {
+    border: 0;
+    border-radius: 999px;
+    background-color: var(--step-scrollbar-thumb);
+  }
+
+  .step-detail-scroll:hover {
+    --step-scrollbar-thumb: color-mix(in oklab, var(--color-muted-foreground) 50%, transparent);
+    scrollbar-color: var(--step-scrollbar-thumb) transparent;
+  }
+
+  /* DAG scroll area - dark mode compatible */
+  .dag-scroll-container {
+    --dag-scrollbar-thumb: color-mix(in oklab, var(--dag-text-secondary) 50%, transparent);
+    --dag-scrollbar-track: var(--dag-bg-main);
+    scrollbar-width: thin;
+    scrollbar-color: var(--dag-scrollbar-thumb) var(--dag-scrollbar-track);
+  }
+
+  .dag-scroll-container::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+    background: var(--dag-scrollbar-track);
+  }
+
+  .dag-scroll-container::-webkit-scrollbar-track,
+  .dag-scroll-container::-webkit-scrollbar-corner {
+    background: var(--dag-scrollbar-track);
+    border: 0;
+  }
+
+  .dag-scroll-container::-webkit-scrollbar-thumb {
+    border: 0;
+    border-radius: 999px;
+    background-color: var(--dag-scrollbar-thumb);
+  }
+
+  .dag-scroll-container:hover {
+    --dag-scrollbar-thumb: color-mix(in oklab, var(--dag-text-secondary) 70%, transparent);
+    scrollbar-color: var(--dag-scrollbar-thumb) var(--dag-scrollbar-track);
+  }
+}
+
+/* Agent process panel animations */
+@keyframes gradient-flow {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.animate-gradient-flow {
+  animation: gradient-flow 3s linear infinite;
+}
+
+/* Sci-fi loader scan animation */
+@keyframes scan {
+  0% {
+    transform: translateY(-100%);
+  }
+
+  100% {
+    transform: translateY(200%);
+  }
+}
+
+.animate-scan {
+  animation: scan 2s ease-in-out infinite;
+}
+
+/* ==================== Sci-Fi Loader Animation ==================== */
+
+/* Container */
+.sci-loader {
+  position: relative;
+}
+
+/* 🌟 Energy Core */
+.sci-core {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  transform: translate(-50%, -50%);
+  background: #00f7ff;
+  border-radius: 50%;
+  box-shadow:
+    0 0 10px #00f7ff,
+    0 0 30px #00f7ff,
+    0 0 60px #00f7ff;
+  animation: sci-pulse 2s infinite ease-in-out;
+}
+
+/* 🔵 Rings */
+.sci-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 247, 255, 0.2);
+}
+
+/* First ring - outer */
+.sci-ring1 {
+  animation: sci-rotate 6s linear infinite;
+  box-shadow: 0 0 10px rgba(0, 247, 255, 0.3);
+}
+
+/* Second ring - inner, reverse */
+.sci-ring2 {
+  inset: 15px;
+  animation: sci-rotate-reverse 8s linear infinite;
+  border-color: rgba(255, 0, 200, 0.3);
+  box-shadow: 0 0 15px rgba(255, 0, 200, 0.3);
+}
+
+/* Third ring - scan effect */
+.sci-ring3 {
+  inset: 30px;
+  border: none;
+}
+
+.sci-ring3::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(transparent,
+      rgba(0, 247, 255, 0.8),
+      transparent);
+  animation: sci-rotate 2s linear infinite;
+  filter: blur(1px);
+}
+
+/* ✨ Keyframes */
+@keyframes sci-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes sci-rotate-reverse {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+@keyframes sci-pulse {
+
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.7;
+  }
+
+  50% {
+    transform: translate(-50%, -50%) scale(1.5);
+    opacity: 1;
+  }
+}
+
+/* ==================== AI Loader Animation ==================== */
+
+.ai-loader {
+  position: relative;
+  width: 220px;
+  height: 220px;
+}
+
+/* Core */
+.ai-loader-core {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  background: #00f7ff;
+  border-radius: 50%;
+  box-shadow:
+    0 0 10px #00f7ff,
+    0 0 30px #00f7ff,
+    0 0 60px #00f7ff;
+  animation: ai-loader-pulse-core 2s infinite ease-in-out;
+}
+
+/* Outer ring */
+.ai-loader-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 247, 255, 0.2);
+  box-shadow: 0 0 20px rgba(0, 247, 255, 0.2);
+  animation: ai-loader-rotate-ring 10s linear infinite;
+}
+
+/* Connections container */
+.ai-loader-connections span {
+  position: absolute;
+  width: 2px;
+  height: 90px;
+  top: 50%;
+  left: 50%;
+  transform-origin: top center;
+  background: linear-gradient(to bottom, rgba(0, 247, 255, 0.8), transparent);
+  overflow: hidden;
+}
+
+/* Different angles */
+.ai-loader-connections span:nth-child(1) {
+  transform: rotate(0deg) translate(-50%, -100%);
+}
+
+.ai-loader-connections span:nth-child(2) {
+  transform: rotate(60deg) translate(-50%, -100%);
+}
+
+.ai-loader-connections span:nth-child(3) {
+  transform: rotate(120deg) translate(-50%, -100%);
+}
+
+.ai-loader-connections span:nth-child(4) {
+  transform: rotate(180deg) translate(-50%, -100%);
+}
+
+.ai-loader-connections span:nth-child(5) {
+  transform: rotate(240deg) translate(-50%, -100%);
+}
+
+.ai-loader-connections span:nth-child(6) {
+  transform: rotate(300deg) translate(-50%, -100%);
+}
+
+/* Data flow */
+.ai-loader-connections span::after {
+  content: "";
+  position: absolute;
+  width: 100%;
+  height: 30%;
+  background: linear-gradient(to bottom, transparent, #00f7ff, transparent);
+  animation: ai-loader-flow 1.5s linear infinite;
+}
+
+/* Keyframes */
+@keyframes ai-loader-flow {
+  0% {
+    top: -30%;
+    opacity: 0;
+  }
+
+  50% {
+    opacity: 1;
+  }
+
+  100% {
+    top: 100%;
+    opacity: 0;
+  }
+}
+
+@keyframes ai-loader-pulse-core {
+
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.8;
+  }
+
+  50% {
+    transform: translate(-50%, -50%) scale(1.4);
+    opacity: 1;
+  }
+}
+
+@keyframes ai-loader-rotate-ring {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ==================== Token Bar Shimmer Animation ==================== */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite;
+}
+
+/* ==================== Kanban DAG Animations ==================== */
+
+/* Node appear: opacity 0→1, scale 0.92→1, gentle float up */
+@keyframes nodeAppear {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Edge data-flow animation via stroke-dashoffset */
+@keyframes edgeFlow {
+  from {
+    stroke-dashoffset: 20;
+  }
+
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* ==================== Kanban Font ==================== */
+
+.kanban-page {
+  font-family: Inter, "SF Pro Display", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ==================== Pure CSS Icons ==================== */
+
+/* Token/Money icon - $¥ offset stacked coin */
+.icon-money-dual {
+  width: 24px;
+  height: 24px;
+  position: relative;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #f6d365, #fda085);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.3);
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Foreground: $ */
+.icon-money-dual::before {
+  content: "$";
+  position: absolute;
+  left: 6px;
+  top: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.7);
+}
+
+/* Background: ¥ (slightly offset + transparent) */
+.icon-money-dual::after {
+  content: "¥";
+  position: absolute;
+  right: 5px;
+  bottom: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.35);
+}
+
+/* Steps icon - Numbered list 1 2 3 */
+.icon-steps {
+  width: 16px;
+  height: 18px;
+  position: relative;
+  display: inline-block;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Left column numbers 1 2 3 */
+.icon-steps::before {
+  content: "1 2 3";
+  white-space: pre;
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 5.5px;
+  font-weight: 900;
+  line-height: 1.35;
+  color: currentColor;
+  letter-spacing: 0;
+}
+
+/* Right side three short horizontal lines (list item content) */
+.icon-steps::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 2px;
+  width: 7px;
+  height: 1.5px;
+  background: currentColor;
+  border-radius: 1px;
+  opacity: 0.7;
+  box-shadow:
+    0 5px 0 currentColor,
+    0 10px 0 currentColor;
+}
+
+/* Arrow left icon - Simple left arrow */
+.icon-arrow-left {
+  width: 16px;
+  height: 16px;
+  position: relative;
+  display: inline-block;
+}
+
+.icon-arrow-left::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 8px;
+  height: 2px;
+  background: currentColor;
+  transform: translateY(-50%);
+  border-radius: 1px;
+}
+
+.icon-arrow-left::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 6px;
+  height: 6px;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-50%) rotate(45deg);
+}
+
+/* ==========================================================================
+   DAG (React Flow) Cyberpunk Animations
+   ========================================================================== */
+
+/* Node pulse animation - subtle breathing glow */
+@keyframes dag-pulse {
+  0%, 100% {
+    box-shadow: 0 0 8px var(--dag-glow, #3B82F6), 0 0 20px var(--dag-glow, #3B82F6), 0 0 40px var(--dag-primary, #3B82F6)20;
+  }
+  50% {
+    box-shadow: 0 0 12px var(--dag-glow, #3B82F6), 0 0 30px var(--dag-glow, #3B82F6), 0 0 60px var(--dag-primary, #3B82F6)40;
+  }
+}
+
+/* Edge flowing dash animation */
+@keyframes dag-flow {
+  from {
+    stroke-dashoffset: 24;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Code background floating animation */
+@keyframes dag-float {
+  0%, 100% {
+    transform: translateY(0px) translateX(0px);
+    opacity: 0.04;
+  }
+  25% {
+    transform: translateY(-10px) translateX(5px);
+    opacity: 0.06;
+  }
+  50% {
+    transform: translateY(-5px) translateX(-3px);
+    opacity: 0.05;
+  }
+  75% {
+    transform: translateY(-15px) translateX(2px);
+    opacity: 0.03;
+  }
+}
+
+/* Node appear animation */
+@keyframes dag-node-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Apply node appear to wrapper */
+.dag-node-wrapper {
+  animation: dag-node-appear 0.4s ease-out both;
+}
+
+/* ==========================================================================
+   React Flow Controls — theme-aware button overrides
+   ========================================================================== */
+
+.dag-rf-controls {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15) !important;
+}
+
+.dag-rf-controls button {
+  background: var(--dag-rf-controls-bg) !important;
+  border-color: var(--dag-rf-controls-border) !important;
+  color: var(--dag-rf-controls-text) !important;
+  transition: background 0.2s ease, color 0.2s ease !important;
+}
+
+.dag-rf-controls button:hover {
+  background: var(--dag-rf-controls-hover-bg) !important;
+  color: var(--dag-rf-controls-hover-text) !important;
+}
+
+.dag-rf-controls svg {
+  fill: var(--dag-rf-controls-text) !important;
+}
+
+.dag-rf-controls button:hover svg {
+  fill: var(--dag-rf-controls-hover-text) !important;
+}

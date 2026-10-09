@@ -1,0 +1,36 @@
+# AgentHub Backend Standalone Docker Compose
+#
+# NOTE: For full-stack deployment (frontend + backend),
+# use the docker-compose.yml at the project root instead. This file is for
+# backend-only deployments where you manage the frontend separately.
+#
+# Prerequisites:
+# - Copy .env.example to .env
+# - Edit POSTGRES_HOST to point to your PostgreSQL instance
+
+networks:
+  backend-network:
+    driver: bridge
+
+services:
+  backend:
+    image: agenthub-backend
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agenthub-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Override for container environment
+      HOST: 0.0.0.0
+      PORT: 8080
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s

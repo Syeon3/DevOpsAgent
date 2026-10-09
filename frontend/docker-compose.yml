@@ -1,0 +1,32 @@
+# AgentHub Frontend Standalone Docker Compose
+#
+# NOTE: For full-stack deployment (frontend + backend),
+# use the docker-compose.yml at the project root instead. This file is for
+# frontend-only deployments where you manage the backend separately.
+#
+# Prerequisites:
+# - Running AgentHub backend instance accessible on the network
+# - Configure NGINX_BACKEND_HOST and NGINX_BACKEND_PORT accordingly
+
+services:
+  frontend:
+    image: agenthub-frontend
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agenthub-frontend
+    restart: unless-stopped
+    env_file:
+      - /app/agenthub/frontend/.env  # Host machine absolute path
+    environment:
+      # Backend proxy configuration
+      NGINX_BACKEND_HOST: ${NGINX_BACKEND_HOST:-127.0.0.1}
+      NGINX_BACKEND_PORT: ${NGINX_BACKEND_PORT:-8080}
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s

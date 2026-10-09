@@ -1,0 +1,476 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { ArrowDown, XIcon } from "lucide-react"
+
+import type { LocalChatMessage, ToolCallInfo, ModelInfo } from "@/types"
+import { ModelSelector } from "@/features/chat/components/model-selector"
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
+import { Separator } from "@/components/ui/separator"
+import {
+  PromptInput,
+  PromptInputBody,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputTextarea,
+} from "@/components/ai/prompt-input"
+import { ChatMessageItem } from "@/features/chat/components/chat-message-item"
+import { SciFiLoader } from "@/components/ai/neural-network-loader"
+import { useI18n } from "@/i18n"
+import { cn } from "@/lib/utils"
+
+
+type ChatMainPanelProps = {
+  appError: string | null
+  isStreaming: boolean
+  isInitializing: boolean
+  isLoadingConversation: boolean
+  isProcessing: boolean // Processing, no content received yet
+  isAgentThinking: boolean
+  calledTools: ToolCallInfo[]
+  thinkingContent: string // Accumulated thinking content
+  messages: LocalChatMessage[]
+  selectedRequestId?: string | null // Currently selected request_id for DAG viewing
+  onSendMessage: (rawInput: string, quotedMessageId?: string, userContent?: string) => Promise<void>
+  onStopStreaming: () => void
+  onJumpToMessage?: (localId: string) => void // Jump to quoted message callback
+  onToggleSidebarProcess?: () => void // Toggle sidebar process panel visibility
+  onSelectRequestId?: (requestId: string | null) => void // Select request_id for DAG viewing
+  // Model selection props
+  models: ModelInfo[]
+  selectedModel: string | null
+  onSelectModel: (modelId: string | null) => void
+  onOpenModelConfig?: () => void // Open model configuration dialog
+  hasAvailableModels?: boolean // Whether there are available models to select from
+  isModelsLoading?: boolean // Whether models are being fetched
+}
+
+const SCROLL_BOTTOM_HIDE_THRESHOLD = 24
+const SCROLL_BUTTON_SHOW_OFFSET = 180
+const SCROLLBAR_FADE_OUT_DELAY = 420
+const STREAM_SCROLL_EASING = 0.2
+const STREAM_SCROLL_MIN_STEP = 1
+const USER_SCROLL_INTERRUPT_DELTA = -2
+
+export function ChatMainPanel({
+  appError,
+  isStreaming,
+  isInitializing,
+  isLoadingConversation,
+  isProcessing,
+  isAgentThinking,
+  calledTools,
+  thinkingContent,
+  messages,
+  selectedRequestId,
+  onSendMessage,
+  onStopStreaming,
+  onJumpToMessage,
+  onToggleSidebarProcess,
+  onSelectRequestId,
+  models,
+  selectedModel,
+  onSelectModel,
+  onOpenModelConfig,
+  hasAvailableModels = true,
+  isModelsLoading = false,
+}: ChatMainPanelProps) {
+  const { t } = useI18n()
+  const [inputValue, setInputValue] = useState("")
+
+  // Quote state - show quoted content above input
+  const [quotedContent, setQuotedContent] = useState<string | null>(null)
+  const [quotedMessageId, setQuotedMessageId] = useState<string | null>(null)
+
+  const endOfMessagesRef = useRef<HTMLDivElement | null>(null)
+  const conversationRef = useRef<HTMLDivElement | null>(null)
+  const scrollbarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const streamFollowRafRef = useRef<number | null>(null)
+  const autoScrollEnabledRef = useRef(true)
+  const isStreamingRef = useRef(isStreaming)
+  const lastKnownScrollTopRef = useRef(0)
+  const [showScrollButton, setShowScrollButton] = useState(false)
+  const [isMessagesScrolling, setIsMessagesScrolling] = useState(false)
+
+  const suggestions = useMemo(
+    () => [
+      t("chat.suggestion.1"),
+      t("chat.suggestion.2"),
+      t("chat.suggestion.3"),
+      t("chat.suggestion.4"),
+    ],
+    [t],
+  )
+
+  const status: "streaming" | "submitted" | "ready" = useMemo(() => {
+    if (isStreaming) {
+      return "streaming"
+    }
+    if (isInitializing || isLoadingConversation) {
+      return "submitted"
+    }
+    return "ready"
+  }, [isInitializing, isLoadingConversation, isStreaming])
+
+  const isComposerDisabled =
+    isInitializing || isLoadingConversation || isModelsLoading || !hasAvailableModels
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const element = conversationRef.current
+    if (!element) {
+      return
+    }
+    element.scrollTo({ top: element.scrollHeight, behavior })
+  }, [])
+
+  const stopStreamFollow = useCallback(() => {
+    if (streamFollowRafRef.current !== null) {
+      window.cancelAnimationFrame(streamFollowRafRef.current)
+      streamFollowRafRef.current = null
+    }
+  }, [])
+
+  const startStreamFollow = useCallback(() => {
+    if (streamFollowRafRef.current !== null) {
+      return
+    }
+
+    const step = () => {
+      const element = conversationRef.current
+      if (!element || !isStreamingRef.current || !autoScrollEnabledRef.current) {
+        streamFollowRafRef.current = null
+        return
+      }
+
+      const targetTop = element.scrollHeight - element.clientHeight
+      const distance = targetTop - element.scrollTop
+
+      if (distance <= 0.5) {
+        element.scrollTop = targetTop
+      } else {
+        element.scrollTop += Math.max(STREAM_SCROLL_MIN_STEP, distance * STREAM_SCROLL_EASING)
+      }
+
+      streamFollowRafRef.current = window.requestAnimationFrame(step)
+    }
+
+    streamFollowRafRef.current = window.requestAnimationFrame(step)
+  }, [])
+
+  useEffect(() => {
+    isStreamingRef.current = isStreaming
+    if (!isStreaming) {
+      stopStreamFollow()
+    }
+  }, [isStreaming, stopStreamFollow])
+
+  useEffect(() => {
+    if (isLoadingConversation || !autoScrollEnabledRef.current) {
+      return
+    }
+
+    if (isStreaming) {
+      startStreamFollow()
+      return
+    }
+
+    scrollToBottom("auto")
+  }, [
+    isLoadingConversation,
+    isStreaming,
+    messages,
+    scrollToBottom,
+    startStreamFollow,
+  ])
+
+  useEffect(() => {
+    return () => {
+      if (scrollbarHideTimerRef.current) {
+        clearTimeout(scrollbarHideTimerRef.current)
+      }
+      stopStreamFollow()
+    }
+  }, [stopStreamFollow])
+
+  const updateScrollButtonState = useCallback(() => {
+    const element = conversationRef.current
+    if (!element) {
+      return
+    }
+
+    setIsMessagesScrolling(true)
+    if (scrollbarHideTimerRef.current) {
+      clearTimeout(scrollbarHideTimerRef.current)
+    }
+    scrollbarHideTimerRef.current = setTimeout(() => {
+      setIsMessagesScrolling(false)
+    }, SCROLLBAR_FADE_OUT_DELAY)
+
+    const distanceFromBottom =
+      element.scrollHeight - element.scrollTop - element.clientHeight
+    const isAtBottom = distanceFromBottom <= SCROLL_BOTTOM_HIDE_THRESHOLD
+    const scrollDelta = element.scrollTop - lastKnownScrollTopRef.current
+    lastKnownScrollTopRef.current = element.scrollTop
+
+    if (isAtBottom) {
+      autoScrollEnabledRef.current = true
+      if (isStreamingRef.current) {
+        startStreamFollow()
+      }
+    } else if (isStreamingRef.current && scrollDelta < USER_SCROLL_INTERRUPT_DELTA) {
+      autoScrollEnabledRef.current = false
+      stopStreamFollow()
+    }
+
+    setShowScrollButton(!isAtBottom && distanceFromBottom > SCROLL_BUTTON_SHOW_OFFSET)
+  }, [startStreamFollow, stopStreamFollow])
+
+  const submitMessage = useCallback((rawInput: string) => {
+    const trimmed = rawInput.trim()
+    if (!trimmed || isStreaming || isComposerDisabled) {
+      return
+    }
+
+    // If there's quoted content, format the message and pass quotedMessageId
+    const finalContent = quotedContent
+      ? `> ${quotedContent}\n\n${trimmed}`
+      : trimmed
+
+    setInputValue("")
+    const currentQuotedMessageId = quotedMessageId
+    setQuotedContent(null)
+    setQuotedMessageId(null)
+
+    // Pass quotedMessageId and userContent for display purposes
+    void onSendMessage(finalContent, currentQuotedMessageId || undefined, trimmed)
+  }, [isComposerDisabled, isStreaming, onSendMessage, quotedContent, quotedMessageId])
+
+  const handleSuggestionClick = useCallback(
+    (value: string) => {
+      if (isStreaming || isComposerDisabled) {
+        return
+      }
+      submitMessage(value)
+    },
+    [isComposerDisabled, isStreaming, submitMessage],
+  )
+
+  const submitButtonDisabled = isStreaming
+    ? false
+    : !inputValue.trim() || status !== "ready" || isComposerDisabled
+  const shouldShowScrollButton =
+    showScrollButton && !isLoadingConversation
+
+  // Clear quoted content
+  const clearQuote = useCallback(() => {
+    setQuotedContent(null)
+    setQuotedMessageId(null)
+  }, [])
+
+  // Check if there are messages (for layout decision)
+  const hasMessages = messages.length > 0
+
+  return (
+    <section className={[
+      "grid h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-background shadow-[inset_0_0_20px_rgba(0,0,0,0.02)] dark:shadow-[inset_0_0_20px_rgba(255,255,255,0.02)] border-x border-border/50",
+      hasMessages ? "grid-rows-[minmax(0,1fr)_auto]" : "grid-rows-[0fr_1fr]"
+    ].join(" ")}>
+      <div
+        className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background px-4 pb-2 md:px-6"
+      >
+        {appError ? (
+          <Alert variant="destructive" className="mt-4">
+            <AlertTitle>{t("chat.requestFailed")}</AlertTitle>
+            <AlertDescription>{appError}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        <div className="relative min-h-0 flex-1">
+          <div
+            ref={conversationRef}
+            className={[
+              "chat-messages-scroll-area mx-auto h-full max-w-4xl overflow-y-auto",
+              isMessagesScrolling ? "is-scrolling" : "",
+            ].join(" ")}
+            onScroll={updateScrollButtonState}
+          >
+            {isLoadingConversation && messages.length === 0 ? (
+              <div className="flex h-full w-full items-center justify-center">
+                <SciFiLoader className="w-32 h-32" showText={false} />
+              </div>
+            ) : (
+              <div
+                className={cn(
+                  "mx-auto flex w-full flex-col gap-4 pb-3 px-3 pt-8 transition-opacity duration-200",
+                  isLoadingConversation && "opacity-50 pointer-events-none"
+                )}
+              >
+                {messages.length === 0 ? null : (
+                  messages.map((message, index) => {
+                    const isLastAIMessage = index === messages.length - 1 && message.type === "ai"
+
+                    // Determine if this message is "selected" (its DAG is shown in sidebar):
+                    // 1. During streaming, the last AI message is always "selected" 
+                    // 2. When user clicks a brain icon, selectedRequestId is set - check if this message's request_id matches
+                    // 3. When sidebar shows default (selectedRequestId is null): last AI message with request_id is selected
+                    const isMessageSelected = message.type === "ai" && (
+                      (isLastAIMessage && isStreaming)
+                        ? true
+                        : selectedRequestId !== null
+                          ? message.request_id === selectedRequestId  // User clicked this message's brain icon
+                          : isLastAIMessage && Boolean(message.request_id)  // Default: show last AI message with request_id
+                    )
+
+                    return (
+                      <ChatMessageItem
+                        key={`msg-${index}`}
+                        message={{ ...message, local_id: `msg-${index}` }}
+                        calledTools={isLastAIMessage ? calledTools : []}
+                        isAgentThinking={isLastAIMessage ? isAgentThinking : false}
+                        thinkingContent={isLastAIMessage ? thinkingContent : ""}
+                        isProcessing={isLastAIMessage && isProcessing}
+                        isStreaming={message.is_streaming}
+                        isSelected={isMessageSelected}
+                        onJumpToMessage={onJumpToMessage}
+                        onToggleSidebarProcess={onToggleSidebarProcess}
+                        onSelectRequestId={onSelectRequestId}
+                      />
+                    )
+                  })
+                )}
+
+                {/* Neural network loading indicator - shown when processing and no AI content yet */}
+                {isProcessing && messages.length > 0 && (
+                  <div className="flex items-center justify-center py-8">
+                    <SciFiLoader className="w-24 h-24" showText={false} />
+                  </div>
+                )}
+
+                <div ref={endOfMessagesRef} />
+              </div>
+            )}
+          </div>
+          {hasMessages ? (
+            <div
+              aria-hidden="true"
+              className="chat-messages-bottom-fade pointer-events-none absolute inset-x-0 bottom-0 z-10 mx-auto h-8 max-w-4xl"
+            />
+          ) : null}
+
+
+        </div>
+
+      </div>
+
+      <footer className={[
+        "relative z-20 bg-background transition-all duration-300",
+        hasMessages ? "" : "h-full flex flex-col items-center justify-center"
+      ].join(" ")}>
+        {shouldShowScrollButton && hasMessages ? (
+          <Button
+            size="icon"
+            variant="secondary"
+            className="absolute top-0 left-1/2 z-30 cursor-pointer -translate-x-1/2 -translate-y-1/2 rounded-full shadow-md"
+            onClick={() => {
+              autoScrollEnabledRef.current = true
+              setShowScrollButton(false)
+              scrollToBottom("smooth")
+              if (isStreamingRef.current) {
+                startStreamFollow()
+              }
+            }}
+          >
+            <ArrowDown className="size-4" />
+          </Button>
+        ) : null}
+        <div className={[
+          "mx-auto w-full max-w-4xl space-y-3 overflow-y-auto",
+          hasMessages ? "p-2 mb-2" : "p-6"
+        ].join(" ")}>
+          <div className="flex flex-wrap gap-2 justify-center">
+            {messages.length === 0 ? (
+              suggestions.map((suggestion) => (
+                <Button
+                  key={suggestion}
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="rounded-4 cursor-pointer"
+                  onClick={() => handleSuggestionClick(suggestion)}
+                  disabled={isStreaming || isComposerDisabled}
+                >
+                  {suggestion}
+                </Button>
+              ))
+            ) : null}
+          </div>
+
+          <PromptInput
+            className="h-auto min-h-12 bg-background [&_[data-slot=input-group]]:rounded-2xl"
+            onSubmit={({ text }) => {
+              submitMessage(text)
+            }}
+          >
+            {/* Quoted content display above input */}
+            {quotedContent ? (
+              <div className="relative px-3 pt-3">
+                <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                  {/* Close button */}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute top-2 right-2 size-5 cursor-pointer"
+                    onClick={clearQuote}
+                  >
+                    <XIcon className="size-3" />
+                  </Button>
+                  {/* Quoted text - gray, show first 100 chars */}
+                  <p className="text-sm text-muted-foreground whitespace-pre-wrap break-words line-clamp-3 pr-6">
+                    {quotedContent.length > 100 ? `${quotedContent.slice(0, 100)}_` : quotedContent}
+                  </p>
+                </div>
+                {/* Separator line */}
+                <Separator className="mt-3" />
+              </div>
+            ) : null}
+
+            <PromptInputBody  >
+              <PromptInputTextarea
+                className="max-h-26 min-h-8"
+                disabled={isComposerDisabled}
+                onChange={(event) => setInputValue(event.currentTarget.value)}
+                value={inputValue}
+                placeholder={quotedContent ? t("message.addYourMessage") : t("prompt.placeholder")}
+              />
+            </PromptInputBody>
+            <PromptInputFooter className="pb-3 justify-between">
+              <div className="flex items-center gap-2">
+                {/* Model selector - only show if there are available models */}
+                {hasAvailableModels && (
+                  <ModelSelector
+                    models={models}
+                    selectedModel={selectedModel}
+                    onSelectModel={onSelectModel}
+                    disabled={isStreaming || isInitializing || isLoadingConversation}
+                    onOpenConfig={onOpenModelConfig}
+                  />
+                )}
+              </div>
+              <PromptInputSubmit
+                disabled={submitButtonDisabled}
+                onClick={isStreaming ? onStopStreaming : undefined}
+                status={status}
+                className="cursor-pointer"
+                type={isStreaming ? "button" : "submit"}
+              />
+            </PromptInputFooter>
+          </PromptInput>
+        </div>
+      </footer>
+    </section>
+  )
+}
