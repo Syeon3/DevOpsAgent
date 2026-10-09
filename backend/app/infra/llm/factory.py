@@ -59,14 +59,11 @@ def get_llm(
     """
     manager = get_model_manager()
 
-    # Parse provider from model_id (format: "provider/model-id")
-    # Support both "provider/model-id" and plain "model-id" formats
-    if "/" in model_id:
-        short_model_id = model_id.split("/", 1)[1]
-    else:
-        short_model_id = model_id
-
-    model_config = manager.get_model(short_model_id)
+    # Resolve against the DB-backed cache. ``manager.get_model`` accepts
+    # "provider/model" and bare "model" spellings interchangeably, because the
+    # stored model_id may or may not carry the provider prefix depending on
+    # how the row was written.
+    model_config = manager.get_model(model_id)
     if model_config is None:
         raise ValueError(f"Model '{model_id}' not found in database.")
 
@@ -84,6 +81,11 @@ def get_llm(
 
     # Get base_url (optional)
     base_url = manager.get_base_url(model_config.provider)
+
+    # Bare model name for LiteLLM — derive from the DB row (authoritative),
+    # not from the caller's spelling of the model id.
+    db_model_id = str(model_config.model_id)
+    short_model_id = db_model_id.split("/", 1)[1] if "/" in db_model_id else db_model_id
 
     # Build full model_id with provider prefix (required by LiteLLM)
     # OpenAI-compatible providers use the "openai/" protocol prefix so LiteLLM

@@ -135,7 +135,30 @@ class ModelManager:
     # ── Model accessors ───────────────────────────────────────────────
 
     def get_model(self, model_id: str):
-        return self._models_cache.get(model_id)
+        """Get model config from cache.
+
+        Resolves tolerantly across spellings: the cache is keyed by the stored
+        ``model_id``, which may or may not carry a "provider/" prefix depending
+        on how the row was written. Accepts:
+
+        - the exact cache key ("glm-4.5-flash" or "local/glm-4.5-flash")
+        - "provider/model" when the cache key is bare
+        - a bare name when the cache key is "provider/model"
+        """
+        m = self._models_cache.get(model_id)
+        if m is not None:
+            return m
+        # Caller passed "provider/model" but the cache is keyed by the bare id.
+        if "/" in model_id:
+            m = self._models_cache.get(model_id.split("/", 1)[1])
+            if m is not None:
+                return m
+        # Caller passed the bare id but the cache is keyed by "provider/model".
+        suffix = f"/{model_id}"
+        for key, cached in self._models_cache.items():
+            if key.endswith(suffix):
+                return cached
+        return None
 
     def is_thinking_mode_available(self, model_id: str | None = None) -> bool:
         """Check if thinking mode is available for a model."""

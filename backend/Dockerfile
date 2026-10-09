@@ -18,15 +18,26 @@ COPY requirements.txt .
 
 # Install Python dependencies with retry and timeout settings
 # Note: asyncpg and psycopg-binary are pure Python / pre-compiled, no system deps needed
-RUN pip install --no-cache-dir --retries 5 --timeout 120 \
-    -i https://pypi.tuna.tsinghua.edu.cn/simple \
-    -r requirements.txt
+#
+# Mirror fallback loop: try Tsinghua -> Aliyun -> official PyPI. Each attempt uses a
+# single mirror, so a congested/failing mirror cannot stall the build forever —
+# pip moves on to the next one. Timeout/retries are deliberately lower than before
+# (120s x 5 could hang ~10min per package on a stalled mirror).
+RUN for mirror in \
+        https://pypi.tuna.tsinghua.edu.cn/simple \
+        https://mirrors.aliyun.com/pypi/simple \
+        https://pypi.org/simple; do \
+        echo "==> pip install from $mirror"; \
+        pip install --no-cache-dir --retries 3 --timeout 30 -i "$mirror" -r requirements.txt && break; \
+    done
 
 # Copy application code
 COPY . .
 
-# Make entrypoint executable
-RUN chmod +x entrypoint.sh
+# Make entrypoint executable.
+# Also strip CR chars: Windows git (core.autocrlf=true) checks out CRLF line endings,
+# which breaks the shebang ("exec ./entrypoint.sh: no such file or directory").
+RUN sed -i 's/\r$//' entrypoint.sh && chmod +x entrypoint.sh
 
 # Expose port
 EXPOSE 8080

@@ -5,7 +5,9 @@ FROM node:24 AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json* pnpm-lock.yaml* ./
-RUN npm install --ignore-scripts
+# Try npmmirror first (much faster in China); fall back to the default registry
+RUN npm install --ignore-scripts --registry=https://registry.npmmirror.com || \
+    npm install --ignore-scripts
 
 COPY . .
 

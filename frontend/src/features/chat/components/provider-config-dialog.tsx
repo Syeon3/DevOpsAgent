@@ -210,7 +210,11 @@ export function ProviderConfigDialog({ open, onOpenChange }: ProviderConfigDialo
       const updateData: ModelUpdate = {}
       if (changes.model_id !== undefined && changes.model_id.trim()) {
         const newModelId = changes.model_id.trim()
-        updateData.model_id = newModelId.includes("/") ? newModelId : `${model.provider}/${newModelId}`
+        // DB stores the bare model id (no provider prefix). Strip the row's
+        // provider prefix if present — mirrors the normalization in createModel.
+        updateData.model_id = newModelId.startsWith(`${model.provider}/`)
+          ? newModelId.slice(model.provider.length + 1)
+          : newModelId
       }
       if (changes.model_type !== undefined) updateData.model_type = changes.model_type
       if (changes.thinking !== undefined) updateData.thinking = changes.thinking

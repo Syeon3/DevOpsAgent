@@ -28,7 +28,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql
       - ./backend/scripts/init-pgvector.sql:/docker-entrypoint-initdb.d/01-init-pgvector.sql
-      - ./backend/scripts/sql/init_database.sql:/docker-entrypoint-initdb.d/02-init_database.sql
+      - ./backend/scripts/sql/000_init_database.sql:/docker-entrypoint-initdb.d/02-init_database.sql
     ports:
       - "5432:5432"
     healthcheck:
