@@ -93,6 +93,9 @@ async def create_model(
             db, str(new_model.model_id)
         )
 
+    # Commit BEFORE refreshing the manager cache: the refresh reads through a
+    # separate connection and cannot see this request's uncommitted changes.
+    await db.commit()
     await get_model_manager().refresh()
     return ModelInfo.model_validate(new_model)
 
@@ -125,6 +128,9 @@ async def update_model(
     if updated_model and update_dict.get("is_default"):
         updated_model = await model_crud.set_default_model_by_id(db, model_id)
 
+    # Commit BEFORE refreshing the manager cache: the refresh reads through a
+    # separate connection and cannot see this request's uncommitted changes.
+    await db.commit()
     await get_model_manager().refresh()
     return ModelInfo.model_validate(updated_model)
 
@@ -146,6 +152,9 @@ async def delete_model(
             detail=f"Model with id '{model_id}' not found",
         )
 
+    # Commit BEFORE refreshing the manager cache: the refresh reads through a
+    # separate connection and cannot see this request's uncommitted changes.
+    await db.commit()
     await get_model_manager().refresh()
 
 
@@ -218,6 +227,9 @@ async def update_provider(
             detail="Failed to update provider",
         )
 
+    # Commit BEFORE refreshing the manager cache: the refresh reads through a
+    # separate connection and cannot see this request's uncommitted changes.
+    await db.commit()
     await get_model_manager().refresh()
     return _provider_to_info(updated)
 
