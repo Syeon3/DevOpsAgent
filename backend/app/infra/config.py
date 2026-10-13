@@ -83,6 +83,14 @@ class Settings(BaseSettings):
     # Default embedding dimension for vector databases
     EMBEDDING_DIMENSION: int = Field(default=1024, ge=1)
 
+    # Optional overrides for the embedding provider:
+    # - API base URL for openai-compatible embedding endpoints (e.g. Zhipu:
+    #   SYSTEM_DEFAULT_EMBEDDING_MODEL=openai/embedding-2 with
+    #   SYSTEM_DEFAULT_EMBEDDING_API_BASE=https://open.bigmodel.cn/api/paas/v4)
+    # - Dedicated API key; falls back to SYSTEM_DEFAULT_LLM_API_KEY when unset.
+    SYSTEM_DEFAULT_EMBEDDING_API_BASE: Optional[str] = None
+    SYSTEM_DEFAULT_EMBEDDING_API_KEY: Optional[SecretStr] = None
+
     # =========================================================================
     # CORS Configuration
     # =========================================================================
@@ -188,7 +196,12 @@ class Settings(BaseSettings):
     @computed_field
     @property
     def system_default_embedding_api_key(self) -> Optional[str]:
-        """Fallback embedding API key — shared with SYSTEM_DEFAULT_LLM_API_KEY."""
+        """Embedding API key — dedicated key first, LLM key as fallback."""
+        if (
+            self.SYSTEM_DEFAULT_EMBEDDING_API_KEY is not None
+            and self.SYSTEM_DEFAULT_EMBEDDING_API_KEY.get_secret_value()
+        ):
+            return self.SYSTEM_DEFAULT_EMBEDDING_API_KEY.get_secret_value()
         if self.SYSTEM_DEFAULT_LLM_API_KEY is None:
             return None
         return self.SYSTEM_DEFAULT_LLM_API_KEY.get_secret_value()

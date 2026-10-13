@@ -8,7 +8,8 @@ Used by: Store, Vectorstore, RAG Agent, and other semantic search components.
 Configuration (from .env):
     SYSTEM_DEFAULT_EMBEDDING_MODEL=provider/model-id (e.g. "openai/text-embedding-3-small")
     EMBEDDING_DIMENSION=1536
-    SYSTEM_DEFAULT_LLM_API_KEY (shared with embedding)
+    SYSTEM_DEFAULT_EMBEDDING_API_BASE (optional, openai-compatible endpoints)
+    SYSTEM_DEFAULT_EMBEDDING_API_KEY (optional; falls back to SYSTEM_DEFAULT_LLM_API_KEY)
 """
 
 from __future__ import annotations
@@ -36,9 +37,15 @@ class LiteLLMEmbeddings(Embeddings):
         - aembed_query(text: str) -> list[float]                  (async)
     """
 
-    def __init__(self, model: str, api_key: str | None = None):
+    def __init__(
+        self,
+        model: str,
+        api_key: str | None = None,
+        api_base: str | None = None,
+    ):
         self.model = model
         self.api_key = api_key
+        self.api_base = api_base
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """Sync embed - not recommended, use aembed_documents instead."""
@@ -60,6 +67,7 @@ class LiteLLMEmbeddings(Embeddings):
             model=self.model,
             input=texts,
             api_key=self.api_key,
+            api_base=self.api_base,
         )
         return [item["embedding"] for item in response.data]
 
@@ -69,6 +77,7 @@ class LiteLLMEmbeddings(Embeddings):
             model=self.model,
             input=[text],
             api_key=self.api_key,
+            api_base=self.api_base,
         )
         return response.data[0]["embedding"]
 
@@ -104,6 +113,7 @@ def init_embedding_model() -> None:
     _embeddings_instance = LiteLLMEmbeddings(
         model=settings.SYSTEM_DEFAULT_EMBEDDING_MODEL,
         api_key=settings.system_default_embedding_api_key,
+        api_base=settings.SYSTEM_DEFAULT_EMBEDDING_API_BASE,
     )
 
     logger.info(

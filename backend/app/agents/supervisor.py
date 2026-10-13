@@ -6,10 +6,12 @@ Multi-turn conversation state is maintained by the checkpointer.
 Architecture (simplified — no subagent delegation):
     User → Agent (checkpointer + dynamic prompt + dynamic model)
                 │
-                └── web_search        (@tool: web search)
+                ├── web_search        (@tool: web search)
+                └── memory            (@tools: save/search/delete — LangGraph store)
 
 Time context is injected into the system prompt by supervisor_prompt middleware
 — no separate ``get_current_time`` tool call needed.
+Long-term memories are injected into the system prompt by the same middleware.
 
 Tools are injected directly — no list_agents/task delegation overhead.
 """
@@ -27,7 +29,7 @@ from app.agents.context import AgentRuntimeContext
 from app.agents.middleware.content_filter import content_filter
 from app.agents.middleware.model import dynamic_model
 from app.agents.middleware.prompt import supervisor_prompt
-from app.agents.tools import create_web_search
+from app.agents.tools import create_web_search, delete_memory, save_memory, search_memory
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +76,12 @@ async def init_agent(
             "Web search unavailable (%s), agent has no tools",
             exc,
         )
+
+    # Long-term memory tools — backed by the LangGraph store, no external
+    # API key needed, so they are always available.
+    tools.append(save_memory)
+    tools.append(search_memory)
+    tools.append(delete_memory)
 
     # Build middleware list following the official LangChain middleware order:
     # Pre-processing → Model Selection → Content Filter → Post-processing.

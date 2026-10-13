@@ -94,7 +94,10 @@ class PostgresStore:
             {
                 "dims": settings.EMBEDDING_DIMENSION,
                 "embed": embed_texts,
-                "fields": ["$"],
+                # Embed only the "content" field — metadata like "importance"
+                # would pollute the vector. Long-term memory values always
+                # carry a "content" key (see app/agents/tools/memory.py).
+                "fields": ["content"],
             },
         )
 
