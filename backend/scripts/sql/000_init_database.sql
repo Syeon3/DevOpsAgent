@@ -134,6 +134,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_models_model_id ON public.models(model_id)
 -- 6. trace_executions table (persisted DAG snapshots for offline trace viewing)
 -- Each row = one agent invocation (user→agent turn), identified by request_id.
 -- Contains model used and the full ExecutionDag.
+-- NOTE: token columns MUST stay in sync with app/models/trace.py
+-- (TraceExecution.input_tokens / output_tokens / total_tokens).
+-- Older databases initialized before these columns existed need:
+--   ALTER TABLE public.trace_executions
+--       ADD COLUMN IF NOT EXISTS input_tokens  BIGINT NOT NULL DEFAULT 0,
+--       ADD COLUMN IF NOT EXISTS output_tokens BIGINT NOT NULL DEFAULT 0,
+--       ADD COLUMN IF NOT EXISTS total_tokens  BIGINT NOT NULL DEFAULT 0;
 CREATE TABLE IF NOT EXISTS public.trace_executions (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     thread_id       UUID NOT NULL REFERENCES public.conversations(thread_id) ON DELETE CASCADE,
@@ -141,8 +148,22 @@ CREATE TABLE IF NOT EXISTS public.trace_executions (
     model_name      VARCHAR(128),              -- LLM model used for this turn
     dag_data        JSONB NOT NULL,             -- Complete ExecutionDag as JSONB
     total_steps     INTEGER NOT NULL DEFAULT 0,
+    input_tokens    BIGINT NOT NULL DEFAULT 0,  -- Input tokens for this turn
+    output_tokens   BIGINT NOT NULL DEFAULT 0,  -- Output tokens for this turn
+    total_tokens    BIGINT NOT NULL DEFAULT 0,  -- Total tokens for this turn
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Idempotent no-ops for freshly created databases (the columns already exist
+-- after the CREATE TABLE above). This file only runs on FIRST database
+-- initialization (docker-entrypoint-initdb.d), so pre-existing databases
+-- still need the manual ALTER TABLE documented in the NOTE above.
+ALTER TABLE public.trace_executions
+    ADD COLUMN IF NOT EXISTS input_tokens  BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.trace_executions
+    ADD COLUMN IF NOT EXISTS output_tokens BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.trace_executions
+    ADD COLUMN IF NOT EXISTS total_tokens  BIGINT NOT NULL DEFAULT 0;
 
 -- Indexes for trace_executions
 CREATE INDEX IF NOT EXISTS idx_trace_exec_thread_id

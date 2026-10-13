@@ -199,6 +199,29 @@ docker logs agenthub-backend 2>&1 | grep -E "Refreshing model|POST /api/v1/model
 - **compose SQL 挂载路径错误**：[docker-compose.yml](docker-compose.yml) 原本挂载不存在的
   `init_database.sql`，已改为实际的 `000_init_database.sql`（数据库表实际由后端启动时自动初始化，幂等）
 
+### 6. 聊天正常，但右侧面板报 "Failed to fetch DAG: 404"
+
+**现象**：聊天、长期记忆都正常，但每条 AI 回复右侧的执行步骤（DAG）面板报 404。
+
+**根因**：代码里的 `TraceExecution` 模型（[models/trace.py](backend/app/models/trace.py)）
+有 `input_tokens / output_tokens / total_tokens` 三列，但初始化 SQL
+（[000_init_database.sql](backend/scripts/sql/000_init_database.sql)）建表时漏了这三列。
+聊天结束后落库时报 `UndefinedColumnError`，被代码里的 try/except 静默吞掉 →
+trace 永远写不进数据库 → 前端查询必然 404。
+
+**修复**（2026-10-13）：
+1. 手动 ALTER 补列（已执行，幂等）：
+   ```sql
+   ALTER TABLE public.trace_executions
+       ADD COLUMN IF NOT EXISTS input_tokens  BIGINT NOT NULL DEFAULT 0,
+       ADD COLUMN IF NOT EXISTS output_tokens BIGINT NOT NULL DEFAULT 0,
+       ADD COLUMN IF NOT EXISTS total_tokens  BIGINT NOT NULL DEFAULT 0;
+   ```
+2. 初始化 SQL 已补上这三列，新初始化数据库的用户不会再踩坑。
+
+> 排查技巧：trace 落库失败不会影响聊天（异常被吞），要看 `docker logs agenthub-backend`
+> 里的 `Failed to persist DAG` 才能发现；`trace_executions` 表 0 行就是信号。
+
 ---
 
 ## 五、项目架构
