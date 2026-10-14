@@ -7,7 +7,8 @@ Architecture (simplified — no subagent delegation):
     User → Agent (checkpointer + dynamic prompt + dynamic model)
                 │
                 ├── web_search        (@tool: web search)
-                └── memory            (@tools: save/search/delete — LangGraph store)
+                ├── memory            (@tools: save/search/delete — LangGraph store)
+                └── ops               (@tools: check_project/check_docker/check_service)
 
 Time context is injected into the system prompt by supervisor_prompt middleware
 — no separate ``get_current_time`` tool call needed.
@@ -29,7 +30,13 @@ from app.agents.context import AgentRuntimeContext
 from app.agents.middleware.content_filter import content_filter
 from app.agents.middleware.model import dynamic_model
 from app.agents.middleware.prompt import supervisor_prompt
-from app.agents.tools import create_web_search, delete_memory, save_memory, search_memory
+from app.agents.tools import (
+    OPS_TOOLS,
+    create_web_search,
+    delete_memory,
+    save_memory,
+    search_memory,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +89,17 @@ async def init_agent(
     tools.append(save_memory)
     tools.append(search_memory)
     tools.append(delete_memory)
+
+    # Ops health-check tools (read-only: project / Docker / service).
+    # They need no API key either; when a capability is not wired up in the
+    # deployment (no docker socket, path outside the allow-list, …) the tool
+    # returns a Chinese explanation instead of raising.
+    from app.infra.config import get_settings
+
+    if get_settings().OPS_ENABLED:
+        tools.extend(OPS_TOOLS)
+    else:
+        logger.info("Ops tools disabled (OPS_ENABLED=false)")
 
     # Build middleware list following the official LangChain middleware order:
     # Pre-processing → Model Selection → Content Filter → Post-processing.

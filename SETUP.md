@@ -24,6 +24,8 @@ AgentHub 是一个基于 **FastAPI + LangGraph** 的多 Agent 运行时平台，
 | 多模型管理 | Web UI 里动态增删模型 / 供应商，无需改代码重启 |
 | 动态模型切换 | 聊天框下拉随时切换模型（LiteLLM 统一调用） |
 | 工具调用 | 当前时间、Web 搜索（Tavily）、知识库语义检索（pgvector） |
+| 长期记忆 | 跨会话记忆（save/search/delete + 自动注入），详见 `AgentHub_MEMORY_IMPLEMENTATION.md` |
+| 运维健康检查 | 项目目录 / Docker 容器 / 服务端口三类只读检查，生成中文诊断报告，详见 `项目与服务健康检查功能说明.md` |
 | 执行可视化 | Kanban 页面以 DAG 形式展示 Agent 每一步执行过程 |
 | 用户体系 | JWT 认证 + 两个内置 mock 用户（Jack / Rose）方便调试 |
 | 微信渠道 | 预留 WeChat iLink 机器人接入能力 |
@@ -221,6 +223,46 @@ trace 永远写不进数据库 → 前端查询必然 404。
 
 > 排查技巧：trace 落库失败不会影响聊天（异常被吞），要看 `docker logs agenthub-backend`
 > 里的 `Failed to persist DAG` 才能发现；`trace_executions` 表 0 行就是信号。
+
+### 7. 运维检查工具"写好了却永远说不可用"——容器是隔离的
+
+**现象**：给 Agent 加了检查宿主机目录 / Docker 容器的工具，代码没问题，
+但 Agent 永远回答"路径不在允许范围内"或"Docker 不可用"。
+
+**根因**：backend 容器原本是**完全隔离**的（docker-compose.yml 里只有 db 服务挂了卷），
+容器内既看不到宿主机的 `E:\Projects`，也没有 `/var/run/docker.sock`。
+工具再怎么写都读不到东西。
+
+**修复**（2026-10-13）：给 backend 服务加两个**只读**挂载：
+
+```yaml
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro   # Docker 容器状态查询
+      - ${OPS_PROJECTS_DIR:-./}:/ops/projects:ro       # 项目目录检查
+```
+
+并用 `OPS_PROJECT_ROOTS=/ops/projects` 告诉工具"只允许查这个目录"。
+要检查别的宿主机目录，用环境变量指过去：
+`OPS_PROJECTS_DIR=E:/Projects docker compose up -d backend`（改挂载必须重建容器）。
+
+> 排查技巧：`docker exec agenthub-backend ls /ops/projects` ——
+> 宿主机目录没挂进来时这里会是空的或报错，一看就知道是挂载问题而不是代码问题。
+
+### 8. 跑后端测试：`No module named pytest`
+
+**原因**：测试依赖（pytest / pytest-asyncio）**故意不装进生产镜像**
+（见 [backend/requirements-dev.txt](backend/requirements-dev.txt)）；
+而且后端代码是 COPY 进镜像的，每次 `docker compose build backend` 都会
+**用新容器替换旧容器**，之前临时 `pip install` 的包会一起消失。
+
+**用法**（脚本会自动装依赖，带国内镜像降级）：
+
+```bash
+docker exec -w /app agenthub-backend bash scripts/run_tests.sh
+docker exec -w /app agenthub-backend bash scripts/run_tests.sh -k ops -v   # 跑子集
+```
+
+实测输出：`44 passed`（见 `项目与服务健康检查功能说明.md` 第八节）。
 
 ---
 

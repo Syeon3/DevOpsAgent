@@ -92,6 +92,37 @@ class Settings(BaseSettings):
     SYSTEM_DEFAULT_EMBEDDING_API_KEY: Optional[SecretStr] = None
 
     # =========================================================================
+    # Ops / Health-check Tools (see app/agents/tools/ops.py)
+    # =========================================================================
+    # The ops tools are READ-ONLY but they reach outside the container, so each
+    # capability is explicitly allow-listed here rather than being open-ended.
+    OPS_ENABLED: bool = True
+
+    # Comma-separated directories `check_project` may inspect. Anything outside
+    # these roots is refused (resolved first → no ../ traversal, no symlink
+    # escape). In Docker these are bind-mounted into the container, read-only.
+    OPS_PROJECT_ROOTS: str = "/ops/projects"
+
+    # Comma-separated hosts (name / IP / CIDR) that `check_service` may probe
+    # ad-hoc. Empty = ad-hoc probing disabled; only OPS_HEALTH_ENDPOINTS work.
+    OPS_ALLOWED_HOSTS: str = ""
+
+    # Named health-check targets: "name=url" pairs, comma-separated. Example:
+    #   backend=http://backend:8080/health,db=tcp://db:5432
+    # The model can only reference these by NAME — URLs stay operator-controlled,
+    # which is what keeps the tool free of SSRF.
+    OPS_HEALTH_ENDPOINTS: str = ""
+
+    # Docker Engine API socket, queried read-only (GET) for `check_docker`.
+    OPS_DOCKER_SOCKET: str = "/var/run/docker.sock"
+
+    # Default / maximum timeout (seconds) for outbound probes.
+    OPS_CHECK_TIMEOUT: float = Field(default=5.0, ge=0.5, le=15.0)
+
+    # Hard cap on tool output length (chars) — keeps prompts small.
+    OPS_MAX_OUTPUT_CHARS: int = Field(default=4000, ge=500, le=20000)
+
+    # =========================================================================
     # CORS Configuration
     # =========================================================================
     # Comma-separated string, e.g.: "http://localhost:5173,https://app.example.com"
@@ -205,6 +236,45 @@ class Settings(BaseSettings):
         if self.SYSTEM_DEFAULT_LLM_API_KEY is None:
             return None
         return self.SYSTEM_DEFAULT_LLM_API_KEY.get_secret_value()
+
+    @computed_field
+    @property
+    def ops_project_roots_list(self) -> list[str]:
+        """Parse OPS_PROJECT_ROOTS into a list of paths."""
+        if not self.OPS_PROJECT_ROOTS.strip():
+            return []
+        return [p.strip() for p in self.OPS_PROJECT_ROOTS.split(",") if p.strip()]
+
+    @computed_field
+    @property
+    def ops_allowed_hosts_list(self) -> list[str]:
+        """Parse OPS_ALLOWED_HOSTS into a list of host / IP / CIDR entries."""
+        if not self.OPS_ALLOWED_HOSTS.strip():
+            return []
+        return [h.strip() for h in self.OPS_ALLOWED_HOSTS.split(",") if h.strip()]
+
+    @computed_field
+    @property
+    def ops_health_endpoints_map(self) -> dict[str, str]:
+        """Parse OPS_HEALTH_ENDPOINTS ('name=url,name=url') into a dict.
+
+        Malformed entries are skipped with a warning — a typo in .env should
+        never stop the application from starting.
+        """
+        result: dict[str, str] = {}
+        for chunk in self.OPS_HEALTH_ENDPOINTS.split(","):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            name, sep, url = chunk.partition("=")
+            name, url = name.strip().lower(), url.strip()
+            if not sep or not name or not url:
+                logger.warning("Ignoring malformed OPS_HEALTH_ENDPOINTS entry: %r", chunk)
+                continue
+            if "://" not in url:
+                url = f"http://{url}"
+            result[name] = url
+        return result
 
     @computed_field
     @property

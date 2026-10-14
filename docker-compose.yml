@@ -58,6 +58,20 @@ services:
       # Override database host to use the db service
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432
+      # Ops tools: root directory the agent may inspect (see volumes below)
+      OPS_PROJECT_ROOTS: /ops/projects
+    volumes:
+      # Ops tools — read-only access to the host so the agent can report on
+      # "is the project / container / service healthy?" with real evidence.
+      #
+      # 1. Docker socket: lets check_docker read container state via the Docker
+      #    Engine API (GET only — the tools never start/stop anything).
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # 2. Project directory: mounted read-only at /ops/projects.
+      #    Defaults to this repository; set OPS_PROJECTS_DIR to point the agent
+      #    at another directory, e.g. OPS_PROJECTS_DIR=E:/Projects in .env-like
+      #    shell environment before `docker compose up -d`.
+      - ${OPS_PROJECTS_DIR:-./}:/ops/projects:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
