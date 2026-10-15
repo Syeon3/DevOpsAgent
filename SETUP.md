@@ -262,7 +262,35 @@ docker exec -w /app agenthub-backend bash scripts/run_tests.sh
 docker exec -w /app agenthub-backend bash scripts/run_tests.sh -k ops -v   # 跑子集
 ```
 
-实测输出：`44 passed`（见 `项目与服务健康检查功能说明.md` 第八节）。
+实测输出：`129 passed`（见 `日志分析与故障诊断功能说明.md` 第八节）。
+
+### 9. Docker HTTP API 的 `since` 只认 Unix 时间戳（不是 CLI 那套写法）
+
+**现象**：给容器日志工具传 `since=10m`，Docker 直接返回 HTTP 400：
+
+```json
+{"message":"invalid value for \"since\": invalid timestamp ..."}
+```
+
+**原因**：`docker logs --since 10m` 里的 `10m` 是 **CLI 自己的语法糖**，
+CLI 会先把它换算成 Unix 秒再调用 API。直接调 Engine API 时，
+`since` 只接受纯数字的 Unix 时间戳。
+
+实测（对同一容器逐个探测 `/containers/{id}/logs?since=…`）：
+
+| `since` 取值 | 结果 |
+|---|---|
+| `1750000000` | ✅ 200 |
+| `10m` / `1h30m` / `30s` | ❌ 400 |
+| `2026-10-14` | ❌ 400 |
+| `2026-10-14T00:00:00`、`…Z` | ❌ 400 |
+
+**本项目的处理**：工具内部用 `_since_to_unix_seconds()` 做转换，
+所以对**模型和用户**来说 `since=10m` 依然可用；但如果你自己写脚本直接调
+Docker API，记得自己换算。
+
+> **通用教训**：CLI 的参数语法 ≠ API 的参数语法。照抄 CLI 文档去调 API 一定会翻车，
+> 拿真实请求探测一遍最省事。这也是本次开发中实测才发现的两个 bug 之一。
 
 ---
 

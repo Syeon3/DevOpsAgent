@@ -122,6 +122,20 @@ class Settings(BaseSettings):
     # Hard cap on tool output length (chars) — keeps prompts small.
     OPS_MAX_OUTPUT_CHARS: int = Field(default=4000, ge=500, le=20000)
 
+    # 允许 check_container_logs 读取日志的容器名，逗号分隔。留空 = 不限
+    # （仍然只读）。多人共用的宿主机上建议填上以缩小影响范围，
+    # 例如 OPS_LOG_CONTAINERS=agenthub-backend,agenthub-db
+    OPS_LOG_CONTAINERS: str = ""
+
+    # 日志读取窗口：check_container_logs 每次默认读 OPS_LOG_TAIL_DEFAULT 行，
+    # 无论模型要多少行，都不会超过 OPS_LOG_TAIL_MAX 行。
+    OPS_LOG_TAIL_DEFAULT: int = Field(default=100, ge=1, le=1000)
+    OPS_LOG_TAIL_MAX: int = Field(default=500, ge=1, le=5000)
+
+    # 日志报告里既有"故障摘要 + 证据"，又有原始日志，所以预算比
+    # OPS_MAX_OUTPUT_CHARS 更大。
+    OPS_LOG_MAX_OUTPUT_CHARS: int = Field(default=6000, ge=1000, le=30000)
+
     # =========================================================================
     # CORS Configuration
     # =========================================================================
@@ -275,6 +289,17 @@ class Settings(BaseSettings):
                 url = f"http://{url}"
             result[name] = url
         return result
+
+    @computed_field
+    @property
+    def ops_log_containers_list(self) -> list[str]:
+        """把 OPS_LOG_CONTAINERS 解析成小写的容器名列表。
+
+        返回空列表表示"不限制"，具体判断见 ``ops._resolve_log_container``。
+        """
+        if not self.OPS_LOG_CONTAINERS.strip():
+            return []
+        return [c.strip().lower() for c in self.OPS_LOG_CONTAINERS.split(",") if c.strip()]
 
     @computed_field
     @property
