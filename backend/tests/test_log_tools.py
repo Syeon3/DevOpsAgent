@@ -791,7 +791,13 @@ def test_check_container_logs_schema_exposes_only_user_facing_args():
 
 def test_check_container_logs_is_part_of_ops_tools():
     assert check_container_logs in OPS_TOOLS
-    assert len(OPS_TOOLS) == 4
+    # 只断言前四个的顺序前缀，别再写死总数 —— 后面每加一个工具都要改这里。
+    assert [t.name for t in OPS_TOOLS[:4]] == [
+        "check_project",
+        "check_docker",
+        "check_service",
+        "check_container_logs",
+    ]
 
 
 def _stub_llm():

@@ -136,6 +136,19 @@ class Settings(BaseSettings):
     # OPS_MAX_OUTPUT_CHARS 更大。
     OPS_LOG_MAX_OUTPUT_CHARS: int = Field(default=6000, ge=1000, le=30000)
 
+    # 运维人员显式声明的"必需环境变量"，逗号分隔。check_config 会挨个确认
+    # 它们在项目里至少被某个 .env 定义过。留空 = 不做这项检查。
+    # 例如 OPS_REQUIRED_ENV=POSTGRES_HOST,POSTGRES_DB,JWT_SECRET_KEY
+    OPS_REQUIRED_ENV: str = ""
+
+    # check_config / diagnose_startup 单个配置文件的大小上限（KB）。
+    # 超过就跳过并说明原因 —— 配置文件正常都是几 KB，异常大的多半不是配置文件。
+    OPS_CONFIG_MAX_FILE_KB: int = Field(default=256, ge=8, le=4096)
+
+    # 配置 / 启动诊断报告的字符预算（比 OPS_MAX_OUTPUT_CHARS 大：
+    # 报告里要列出证据行和处理建议）。
+    OPS_CONFIG_MAX_OUTPUT_CHARS: int = Field(default=6000, ge=1000, le=30000)
+
     # =========================================================================
     # CORS Configuration
     # =========================================================================
@@ -300,6 +313,18 @@ class Settings(BaseSettings):
         if not self.OPS_LOG_CONTAINERS.strip():
             return []
         return [c.strip().lower() for c in self.OPS_LOG_CONTAINERS.split(",") if c.strip()]
+
+    @computed_field
+    @property
+    def ops_required_env_list(self) -> list[str]:
+        """把 OPS_REQUIRED_ENV 解析成变量名列表（保持原样大小写）。
+
+        返回空列表表示"运维没声明必需项"，此时 check_config 不做这项判断 ——
+        工具不会自作主张认为某个变量是必需的。
+        """
+        if not self.OPS_REQUIRED_ENV.strip():
+            return []
+        return [k.strip() for k in self.OPS_REQUIRED_ENV.split(",") if k.strip()]
 
     @computed_field
     @property

@@ -262,7 +262,7 @@ docker exec -w /app agenthub-backend bash scripts/run_tests.sh
 docker exec -w /app agenthub-backend bash scripts/run_tests.sh -k ops -v   # 跑子集
 ```
 
-实测输出：`129 passed`（见 `日志分析与故障诊断功能说明.md` 第八节）。
+实测输出：`286 passed`（见 `项目配置与启动问题分析功能说明.md` 第八节）。
 
 ### 9. Docker HTTP API 的 `since` 只认 Unix 时间戳（不是 CLI 那套写法）
 
@@ -291,6 +291,39 @@ Docker API，记得自己换算。
 
 > **通用教训**：CLI 的参数语法 ≠ API 的参数语法。照抄 CLI 文档去调 API 一定会翻车，
 > 拿真实请求探测一遍最省事。这也是本次开发中实测才发现的两个 bug 之一。
+
+### 10. Compose 的 `${VAR}` 插值**不认** `env_file`（配了也白配）
+
+**现象**：`.env` 放在 `svc/` 里、由 `env_file` 指过去，compose 里写
+`image: myapp:${TAG}`，结果镜像名变成了 `myapp:`（TAG 是空的），
+`environment: TOK: ${MY_TOKEN}` 也变成空字符串 —— 但 `env_file` 本身是生效的。
+
+**原因**：Compose 的变量插值发生在**读取 compose 文件的那一刻**，它只查两个地方：
+**compose 文件同级目录的 `.env`** 和 **shell 环境变量**。
+`env_file` 是"容器启动时注入给进程的环境变量"，两者时序不同 ——
+`env_file` 里的值进入容器时，`${...}` 早就替换完了。
+
+实测原文（`docker compose config`，`svc/.env` 里写了 `TAG=v1.2.3` / `MY_TOKEN=abc`）：
+
+```
+level=warning msg="The \"TAG\" variable is not set. Defaulting to a blank string."
+level=warning msg="The \"MY_TOKEN\" variable is not set. Defaulting to a blank string."
+name: compose-interp-demo
+services:
+  app:
+    environment:
+      MY_TOKEN: abc      # ← env_file 确实注入进来了
+      TAG: v1.2.3        # ← 同上
+      TOK: ""            # ← 但 ${MY_TOKEN} 在插值阶段就已经是空的
+    image: 'myapp:'      # ← 镜像名被截断成 myapp:
+```
+
+**本项目的处理**：`check_config` / `diagnose_startup` 会检查每个 `${VAR}`
+有没有默认值、有没有在同级 `.env` 或环境里定义，没定义就报
+「Compose 变量未定义」并说明这个坑。
+
+**规避**：把参与插值的变量写进 **compose 同级的 `.env`**，
+或者写成带默认值的形式 `${VAR:-默认值}`。
 
 ---
 

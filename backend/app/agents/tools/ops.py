@@ -1,32 +1,38 @@
-"""运维工具 —— 项目结构、Docker 守护进程、服务健康检查、容器日志。
+"""运维工具 —— 项目结构、Docker 守护进程、服务健康检查、容器日志、配置与启动分析。
 
-"智能运维诊断"能力的实现。四个只读工具，让 Agent 拿到的是真实证据，而不是猜：
+"智能运维诊断"能力的实现。六个只读工具，让 Agent 拿到的是真实证据，而不是猜：
 
 - ``check_project``        —— 目录在不在？是什么类型的项目？关键配置文件齐不齐？
 - ``check_docker``         —— Docker 守护进程连得上吗？有哪些容器？运行状态和健康检查如何？
 - ``check_service``        —— 对**白名单内**的目标做 HTTP / TCP 探测。
 - ``check_container_logs`` —— 读取容器最近的日志，匹配已知故障模式（见 ``log_analysis.py``）。
+- ``check_config``         —— 配置文件对不对？见 ``config_check.py``。
+- ``diagnose_startup``     —— 为什么起不来？compose 声明 vs 容器实际状态的差集。
 
 安全模型（改代码前务必读一遍）
 ------------------------------
-1. **不允许任意路径。** ``check_project`` 只接受 ``OPS_PROJECT_ROOTS`` 里列出的
-   目录下的路径，并且先 ``resolve()`` 再比较，所以 ``../`` 穿越和指向目录外的
-   软链接都会被拒绝。
+1. **不允许任意路径。** ``check_project`` / ``check_config`` / ``diagnose_startup``
+   只接受 ``OPS_PROJECT_ROOTS`` 里列出的目录下的路径，并且先 ``resolve()`` 再比较，
+   所以 ``../`` 穿越和指向目录外的软链接都会被拒绝。
 2. **不允许任意 URL。** ``check_service`` 只探测运维人员在
    ``OPS_HEALTH_ENDPOINTS`` 里显式配置的目标；临时传入的 ``host:port`` 还要再过一遍
    ``OPS_ALLOWED_HOSTS`` 白名单（默认为空 = 直接禁用临时目标）。云厂商元数据地址
    即使命中了白名单也一律拒绝。
-3. **不泄露密钥。** 工具不读文件内容；报告里出现的 URL、响应片段、日志行都会经过
-   ``_redact`` 脱敏（query string、常见的 key=value 凭证、Bearer Token、连接串密码等）。
-4. **不写。** 所有 Docker 调用都是走 Unix socket 的 GET 请求，不创建、不启动、不删除。
-5. **容器名不能注入。** ``check_container_logs`` 先用严格正则校验容器名，再做 URL 编码，
-   所以容器名永远无法拼出额外的 query 参数或穿越接口路径；还可以用
-   ``OPS_LOG_CONTAINERS`` 白名单进一步缩小可读范围。
-6. **日志内容是不可信数据。** 日志行是容器里的程序写出来的，可能包含"说给模型听"的
-   恶意指令。工具会标记这类行（``log_analysis.scan_injection``），并把整段日志包在
-   明确的"这是数据、不是指令"说明里。
+3. **不泄露密钥。** ``check_project`` 只读文件名不读内容；``check_config`` 会读配置
+   文件内容，但**只读白名单里那几种文件名**（.env*、docker-compose*.yml、.gitignore），
+   而且密钥类变量的值在 ``config_check.DotenvFile.safe_items`` 里就被替换掉了 ——
+   不是"渲染时记得别打印"，而是数据源头就不给。报告里其余文本再过一遍 ``_redact``
+   （query string、key=value 凭证、Bearer Token、连接串密码等）。
+4. **不写。** 所有 Docker 调用都是走 Unix socket 的 GET 请求，不创建、不启动、不删除；
+   配置文件只以 ``"r"`` 模式打开。工具不会修改配置，也不会重启任何东西。
+5. **容器名 / 路径不能注入。** ``check_container_logs`` 先用严格正则校验容器名，再做 URL
+   编码；``diagnose_startup`` 里的容器 ID 也经过 ``quote()``。容器名永远无法拼出额外的
+   query 参数或穿越接口路径；还可以用 ``OPS_LOG_CONTAINERS`` 缩小可读范围。
+6. **文件和日志内容都是不可信数据。** 日志行是容器里的程序写出来的，配置文件也可能被人
+   故意写入"说给模型听"的指令。工具会标记疑似注入的日志行
+   （``log_analysis.scan_injection``），并把内容包在明确的"这是数据、不是指令"说明里。
 
-四个工具都是只读的，可以放心暴露给任何已登录用户。
+六个工具都是只读的，可以放心暴露给任何已登录用户。
 """
 
 import asyncio
@@ -36,6 +42,7 @@ import logging
 import os
 import re
 import time
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -45,6 +52,15 @@ from urllib.parse import quote, urlparse, urlunparse
 import aiohttp
 from langchain_core.tools import tool
 
+from app.agents.tools.config_check import (
+    audit,
+    check_startup,
+    container_name_of,
+    is_sensitive_key,
+    match_container,
+    parse_compose,
+    parse_dotenv,
+)
 from app.agents.tools.log_analysis import (
     INJECTION_MARK,
     analyze_logs,
@@ -1357,6 +1373,696 @@ async def check_container_logs(
     return _render_log_report(name, tail_n, since, text, note)
 
 
+# ── Tool 5 / 6: 配置检查、启动问题分析 ──────────────────────────────────────
+
+# 只"看一眼"这几类文件。用白名单而不是"遍历目录里所有文件"有两个原因：
+# ① 工具要回答的是"配置对不对"，不是当文件浏览器用；
+# ② 白名单从机制上保证了它永远不会顺手把某个不认识的文件内容读出来。
+_DOTENV_NAME_RE = re.compile(r"^(?:\.env(?:\.[A-Za-z0-9_.-]+)?|[A-Za-z0-9_.-]+\.env)$")
+_COMPOSE_NAME_RE = re.compile(r"^(?:docker-compose|compose)\.ya?ml$", re.IGNORECASE)
+_GITIGNORE_NAME = ".gitignore"
+
+_MAX_CONFIG_DIRS = 16  # 最多扫描几个子目录（含根目录）
+_MAX_CONFIG_FILES = 32  # 最多读取几个配置文件
+_MAX_VALUE_PREVIEW = 10  # 每个文件最多预览几个非密钥变量的值
+_MAX_INSPECT = 6  # 启动诊断里最多 inspect 几个未运行的容器
+
+_CONFIG_SECURITY_NOTE = (
+    "安全说明：本工具全程只读 —— 不修改、不创建、不删除任何文件，"
+    "也不会启动或重启任何容器。"
+    "报告里密钥类变量（名字含 KEY / SECRET / TOKEN / PASSWORD / DSN 等）的值一律不显示，"
+    "只保留键名和长度；非密钥变量的值经过脱敏后才会出现。"
+)
+
+_CONFIG_CHECKED_ITEMS = (
+    "已检查：① .env 的语法（无等号的行、非法键名、重复键、空值）；"
+    "② .env 与 .env.example 的差异（模板声明了但没配、配了但没进模板）；"
+    "③ 模板文件里是否写入了真实密钥；"
+    "④ compose 的 YAML 语法、services 段、服务是否缺 image/build；"
+    "⑤ compose 引用的 env_file 是否存在；"
+    "⑥ depends_on 指向的服务是否存在；"
+    "⑦ 宿主机端口冲突；"
+    "⑧ ${VAR} 插值引用的变量是否定义；"
+    "⑨ build.context 目录是否存在；"
+    "⑩ .env 是否被 .gitignore 覆盖。"
+)
+
+_CONFIG_NOT_CHECKED = (
+    "未检查（工具能力之外，不要当成「已经确认没问题」）："
+    "① 配置文件内容的业务语义（例如某个 URL 写得对不对）；"
+    "② 代码里实际读取了哪些环境变量（不解析源码）；"
+    "③ 运行中的容器实际拿到了什么环境变量（只读文件，不 exec 进容器）；"
+    "④ 宿主机上端口是否被非 Docker 进程占用（只能看到容器占用的端口）。"
+)
+
+
+def _read_config_text(path: Path, limit_bytes: int) -> tuple[str, str]:
+    """读取一个配置文件，返回 ``(文本, 问题说明)``。
+
+    正常时问题说明为空；读不了就返回空文本 + 一句可直接展示的中文说明。
+    对非 UTF-8 编码**不静默处理**：这是真实存在且很难查的问题
+    （Windows 上用记事本把 .env 另存成 GBK，服务读出来就是乱码或解析失败）。
+    """
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        return "", f"{path.name}：无法读取文件属性（{exc}）"
+    if size > limit_bytes:
+        return "", (
+            f"{path.name}：文件 {_human_size(size)}，超过 "
+            f"{_human_size(limit_bytes)} 的读取上限，已跳过。"
+            "配置文件正常只有几 KB，异常大的多半不是配置文件。"
+        )
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        return "", f"{path.name}：读取失败（{exc}）"
+
+    try:
+        return raw.decode("utf-8"), ""
+    except UnicodeDecodeError:
+        text = raw.decode("utf-8", errors="replace")
+        return text, (
+            f"{path.name}：不是合法的 UTF-8 编码（已用替代字符解码）。"
+            "服务按 UTF-8 读取时会得到乱码，或直接解析失败。"
+        )
+
+
+def _collect_config_files(
+    root: Path,
+) -> tuple[dict[str, str], dict[str, str], set[str], list[str], str]:
+    """扫描项目根目录 + 下一级子目录，读取候选配置文件。
+
+    Returns:
+        ``(dotenv 文件, compose 文件, 存在的条目, 扫描说明, .gitignore 内容)``。
+        前两者是 ``相对项目根的 posix 路径 -> 文件原文``；第三个用于判断
+        compose 里 ``env_file`` / ``build.context`` 指向的路径是否存在；
+        说明里记录"跳过了什么、为什么"，避免报告看起来像"什么都查过了"。
+    """
+    limit_bytes = get_settings().OPS_CONFIG_MAX_FILE_KB * 1024
+    dotenv: dict[str, str] = {}
+    compose: dict[str, str] = {}
+    present: set[str] = set()
+    notes: list[str] = []
+    gitignore = ""
+
+    try:
+        entries = sorted(root.iterdir(), key=lambda p: p.name)
+    except OSError as exc:
+        return dotenv, compose, present, [f"无法列出项目根目录（{exc}）。"], gitignore
+
+    # 只往下走一层：AgentHub 这类仓库把 .env 放在 backend/ 和 frontend/，
+    # 再深就跑到 node_modules 之类的地方去了。
+    dirs: list[Path] = [root]
+    for entry in entries:
+        if (
+            entry.is_dir()
+            and not entry.name.startswith((".", "_"))
+            and entry.name not in _SKIP_DIRS
+        ):
+            dirs.append(entry)
+    if len(dirs) > _MAX_CONFIG_DIRS:
+        notes.append(
+            f"子目录较多，只扫描了前 {_MAX_CONFIG_DIRS - 1} 个（根目录下有 {len(dirs) - 1} 个）。"
+        )
+        dirs = dirs[:_MAX_CONFIG_DIRS]
+
+    files_read = 0
+    for directory in dirs:
+        if directory is not root:
+            try:
+                dir_entries = sorted(directory.iterdir(), key=lambda p: p.name)
+            except OSError as exc:
+                notes.append(f"无法列出 {directory.name}/（{exc}）。")
+                continue
+        else:
+            dir_entries = entries
+
+        for entry in dir_entries:
+            try:
+                rel = entry.relative_to(root).as_posix()
+            except ValueError:  # pragma: no cover - 同一次遍历不会发生
+                continue
+            present.add(rel)
+            if entry.is_dir():
+                continue
+
+            name = entry.name
+            is_env = bool(_DOTENV_NAME_RE.match(name))
+            is_compose = bool(_COMPOSE_NAME_RE.match(name))
+            is_gitignore = name == _GITIGNORE_NAME
+            if not (is_env or is_compose or is_gitignore):
+                continue
+
+            if files_read >= _MAX_CONFIG_FILES:
+                notes.append(f"配置文件数量超过 {_MAX_CONFIG_FILES} 个上限，其余未读取。")
+                return dotenv, compose, present, notes, gitignore
+
+            text, problem = _read_config_text(entry, limit_bytes)
+            files_read += 1
+            if problem:
+                notes.append(problem)
+                continue
+            if is_env:
+                dotenv[rel] = text
+            elif is_compose:
+                compose[rel] = text
+            else:
+                gitignore = text
+
+    return dotenv, compose, present, notes, gitignore
+
+
+def _describe_config_files(
+    dotenv: dict[str, str], compose: dict[str, str]
+) -> list[str]:
+    """列出"读到了哪些配置文件"，顺便说明隐藏了几个密钥类变量。"""
+
+    lines: list[str] = []
+    for label in sorted(dotenv):
+        parsed = parse_dotenv(dotenv[label], label=label)
+        hidden = sum(1 for k in parsed.order if is_sensitive_key(k))
+        detail = f"{len(parsed.order)} 个键"
+        if hidden:
+            detail += f"，其中 {hidden} 个密钥类变量的值已隐藏"
+        if parsed.duplicates:
+            detail += f"，{len(parsed.duplicates)} 个键重复定义"
+        lines.append(f"  - {label}（{detail}）")
+    for label in sorted(compose):
+        parsed = parse_compose(compose[label], label=label)
+        if parsed.problems:
+            lines.append(f"  ! {label}（解析失败）")
+        else:
+            names = "、".join(sorted(parsed.services)) or "无"
+            lines.append(f"  - {label}（{len(parsed.services)} 个服务：{names}）")
+    return lines
+
+
+def _preview_config_values(dotenv: dict[str, str]) -> list[str]:
+    """挑几个**非密钥**变量的值展示出来。
+
+    为什么值得展示：像 ``POSTGRES_HOST=localhost``（容器里应该写服务名 ``db``）
+    这类错误，只看键名是发现不了的，必须看到值。
+    密钥类变量的值由 ``DotenvFile.safe_items`` 在数据层就换成了 ``***``，
+    这里再经一遍 ``_redact``，是两道独立的保险。
+    """
+
+    lines: list[str] = []
+    for label in sorted(dotenv):
+        parsed = parse_dotenv(dotenv[label], label=label)
+        pairs = [
+            f"{key}={_redact(value)}"
+            for key, value in parsed.safe_items()
+            if value and value != "***"
+        ]
+        if not pairs:
+            continue
+        shown = pairs[:_MAX_VALUE_PREVIEW]
+        more = f"…（另有 {len(pairs) - len(shown)} 个）" if len(pairs) > len(shown) else ""
+        lines.append(f"  {label}：" + "、".join(_clip_line(p) for p in shown) + more)
+    return lines
+
+
+def _clip_line(text: str, limit: int = 60) -> str:
+    """把一行证据截短，避免某个超长变量值把预览行撑爆。"""
+    text = " ".join(str(text).split())
+    return text if len(text) <= limit else f"{text[:limit]}…"
+
+
+def _render_findings(findings: Sequence[Any], *, empty_note: str) -> list[str]:
+    """把结论列表渲染成"证据 / 可能原因 / 处理建议"三段式。
+
+    ``【已证实】`` 打在证据上，``【推测】`` 打在原因上 —— 这个区分是**由渲染
+    逻辑强制**的，而不是靠提示词要求模型自觉。用户看到的报告因此天然分得清
+    "工具查到了什么"和"我猜是什么原因"。
+    """
+    if not findings:
+        return [empty_note]
+
+    blocks: list[str] = []
+    for index, finding in enumerate(findings, start=1):
+        block = [f"{index}. [{finding.severity}] {finding.category}"]
+        block.append(f"   【已证实】证据：{finding.evidence[0]}")
+        for extra in finding.evidence[1:]:
+            block.append(f"                 {extra}")
+        block.append(f"   【推测】可能原因：{finding.hint}")
+        block.append(f"   处理建议：{finding.advice}")
+        blocks.append("\n".join(block))
+    return blocks
+
+
+def _render_config_report(
+    root: Path,
+    dotenv: dict[str, str],
+    compose: dict[str, str],
+    notes: Sequence[str],
+    findings: Sequence[Any],
+) -> str:
+    """渲染配置检查报告。"""
+    limit = get_settings().OPS_CONFIG_MAX_OUTPUT_CHARS
+    counts = {
+        level: sum(1 for f in findings if f.severity == level)
+        for level in ("严重", "警告", "提示")
+    }
+    if counts["严重"]:
+        status = "异常"
+    elif counts["警告"]:
+        status = "正常（有警告）"
+    elif counts["提示"]:
+        status = "正常（有提示）"
+    else:
+        status = "正常"
+
+    head = [f"【配置检查】{root}"]
+    if findings:
+        head.append(
+            f"总体状态：{status}（发现 {counts['严重']} 项严重 / "
+            f"{counts['警告']} 项警告 / {counts['提示']} 项提示）"
+        )
+    else:
+        head.append("总体状态：正常（未发现配置问题）")
+    head.append("检查范围：项目根目录及其下一级子目录，只读，未修改任何文件")
+
+    parts: list[str] = ["\n".join(head)]
+
+    described = _describe_config_files(dotenv, compose)
+    if described:
+        parts.append("\n".join(["== 读取到的配置文件 =="] + described))
+    else:
+        parts.append(
+            "== 读取到的配置文件 ==\n"
+            "  未找到 .env / docker-compose.yml 这类配置文件。"
+            "请确认路径是否是项目根目录（可以用 check_project 先看一下目录结构）。"
+        )
+
+    preview = _preview_config_values(dotenv)
+    if preview:
+        parts.append(
+            "\n".join(
+                ["== 非密钥配置项预览（密钥类变量的值不会出现在这里）=="] + preview
+            )
+        )
+
+    if notes:
+        parts.append("\n".join(["== 扫描说明 =="] + [f"  ! {n}" for n in notes]))
+
+    if findings:
+        parts.append(
+            "\n\n".join(["== 问题摘要（按严重程度排序）=="] + _render_findings(
+                findings, empty_note=""
+            ))
+        )
+    else:
+        parts.append("== 问题摘要 ==\n  " + _CONFIG_CHECKED_ITEMS)
+
+    parts.append(_CONFIG_NOT_CHECKED)
+    parts.append(_CONFIG_SECURITY_NOTE)
+
+    return _truncate("\n\n".join(parts), limit)
+
+
+def _config_scope_error(title: str, raw_path: str, error: str) -> str:
+    """路径被拒绝 / 不存在时的统一回复（两个工具共用）。"""
+    return _truncate(
+        f"{title}：{raw_path}\n"
+        f"总体状态：已拒绝\n"
+        f"原因：{error}\n"
+        "处理建议：先用 check_project 不带参数调用一次，看看允许检查哪些目录，"
+        "再把其中的项目路径传进来。"
+    )
+
+
+@tool
+def check_config(path: str) -> str:
+    """检查一个项目的配置文件是否完整、是否正确（运维诊断的第 5 个工具）。
+
+    **只读**：只读取文件内容做静态分析，绝不修改、创建或删除任何文件，
+    也不会启动 / 重启任何容器。
+
+    会检查 ``.env``、``.env.example``、``docker-compose.yml`` / ``compose.yml``
+    和 ``.gitignore``，识别这些问题：
+
+    - 必需配置缺失：``.env.example`` 里声明了、``.env`` 里却没有的键；
+    - 环境变量未配置 / 为空；
+    - 配置引用不一致：compose 引用的 ``env_file`` 不存在、``depends_on``
+      指向不存在的服务、``${VAR}`` 插值引用的变量没定义、``build.context``
+      目录不存在；
+    - 明显格式错误：不是 KEY=VALUE 的行、非法键名、重复键、
+      YAML 语法错误、非 UTF-8 编码；
+    - 端口冲突：两个服务映射同一个宿主机端口；
+    - 安全提示：模板文件里写进了真实密钥、``.env`` 没有被 ``.gitignore`` 覆盖。
+
+    **不会输出任何密钥的值**：名字里含 KEY / SECRET / TOKEN / PASSWORD / DSN
+    等词的变量只显示键名，值在数据层就被替换掉了。
+
+    只能检查服务端预先允许的目录（``OPS_PROJECT_ROOTS``），传入其他路径会被拒绝。
+
+    Args:
+        path: 要检查的项目目录的绝对路径，例如 "/ops/projects/AgentHub"。
+              必需 —— 它只检查这一个目录及其下一级子目录。
+
+    Returns:
+        中文配置检查报告：读取到的配置文件 / 非密钥配置项预览 /
+        按严重程度排序的问题（证据 / 可能原因 / 处理建议）/ 未覆盖的内容。
+    """
+    raw_path = path or ""
+    resolved, error = _resolve_allowed_path(raw_path)
+    if resolved is None:
+        return _config_scope_error("【配置检查】", raw_path, error)
+
+    if not resolved.exists():
+        return _truncate(
+            f"【配置检查】{resolved}\n"
+            "总体状态：异常\n"
+            "检查证据：目录不存在。\n"
+            "可能原因：路径写错，或项目没有挂载进容器。\n"
+            "处理建议：用 check_project 不带参数调用一次，看看当前能检查哪些目录。"
+        )
+    if not resolved.is_dir():
+        return _truncate(
+            f"【配置检查】{resolved}\n"
+            "总体状态：异常\n"
+            "检查证据：该路径存在但不是目录。\n"
+            "处理建议：传入项目根目录而不是文件路径。"
+        )
+
+
+    dotenv, compose, present, notes, gitignore = _collect_config_files(resolved)
+    try:
+        findings = audit(
+            dotenv_files=dotenv,
+            compose_files=compose,
+            present_files=present,
+            required_keys=get_settings().ops_required_env_list,
+            gitignore=gitignore,
+        )
+    except Exception as exc:  # noqa: BLE001 - 检查工具不该把异常抛给模型
+        logger.warning("check_config audit failed for %s: %s", resolved, exc)
+        return _truncate(
+            f"【配置检查】{resolved}\n"
+            "总体状态：检查失败\n"
+            f"原因：分析配置文件时出错（{type(exc).__name__}: {exc}）。\n"
+            "处理建议：这多半是某个配置文件的内容触发了分析器的边界情况，"
+            "先确认这些文件本身是正常的文本文件。"
+        )
+
+    return _render_config_report(resolved, dotenv, compose, notes, findings)
+
+
+# ── Tool 6: 启动问题分析 ────────────────────────────────────────────────────
+
+
+async def _inspect_containers(
+    socket_path: str, containers: Sequence[Mapping[str, Any]], timeout: float
+) -> tuple[dict[str, Any], list[str]]:
+    """对"存在但没在跑"的容器补一次 inspect，拿退出码和 OOM 标记。
+
+    只查最上面的 ``_MAX_INSPECT`` 个：这几次请求是**额外**开销，
+    而退出码只是线索（真正的原因在日志里），不值得为它把响应拖长。
+    """
+
+    inspect: dict[str, Any] = {}
+    notes: list[str] = []
+    targets = [
+        c for c in containers if str(c.get("State", "")).lower() not in ("running", "restarting")
+    ]
+    if len(targets) > _MAX_INSPECT:
+        notes.append(
+            f"已停止的容器较多，只额外查询了前 {_MAX_INSPECT} 个的退出码（共 {len(targets)} 个）。"
+        )
+    for container in targets[:_MAX_INSPECT]:
+        container_id = str(container.get("Id", ""))
+        if not container_id:
+            continue
+        # container_id 来自 Docker 自己的响应，不是用户输入；仍然 quote 一下，
+        # 保证它不可能拼出额外的路径段。
+        data, error = await _docker_api(
+            socket_path, f"/containers/{quote(container_id, safe='')}/json", timeout
+        )
+        if error or not isinstance(data, Mapping):
+            notes.append(f"{container_name_of(container)}：读取容器详情失败（{error or '返回格式异常'}）。")
+            continue
+        inspect[container_name_of(container)] = data
+    return inspect, notes
+
+
+def _render_startup_report(
+    root: Path,
+    label: str,
+    findings: Sequence[Any],
+    *,
+    scope: str,
+    notes: Sequence[str],
+    compose_names: Sequence[str],
+    container_lines: Sequence[str],
+) -> str:
+    """渲染启动问题分析报告。"""
+    limit = get_settings().OPS_CONFIG_MAX_OUTPUT_CHARS
+    counts = {
+        level: sum(1 for f in findings if f.severity == level)
+        for level in ("严重", "警告", "提示")
+    }
+    if counts["严重"]:
+        status = "异常"
+    elif counts["警告"]:
+        status = "正常（有警告）"
+    elif counts["提示"]:
+        status = "正常（有提示）"
+    else:
+        status = "正常"
+
+    head = [f"【启动问题分析】{root}"]
+    head.append(f"总体状态：{status}（{scope}）")
+    head.append(f"分析依据：{label} 的服务声明 + Docker 里容器的实际状态")
+    head.append(
+        "判定方式：配置说「应该跑什么」，Docker 说「实际在跑什么」，"
+        "两者的差集就是启动出问题的地方。"
+    )
+
+    parts: list[str] = ["\n".join(head)]
+
+    parts.append(
+        "\n".join(["== compose 声明的服务 =="] + [f"  - {n}" for n in compose_names])
+        if compose_names
+        else "== compose 声明的服务 ==\n  未解析出任何服务。"
+    )
+
+    if container_lines:
+        parts.append("\n".join(["== Docker 里的对应容器 =="] + list(container_lines)))
+
+    if notes:
+        parts.append("\n".join(["== 分析说明 =="] + [f"  ! {n}" for n in notes]))
+
+    parts.append(
+        "\n\n".join(
+            ["== 启动问题（按严重程度排序）=="]
+            + _render_findings(
+                findings,
+                empty_note=(
+                    "  未发现启动问题：compose 里的服务都能在 Docker 里找到对应容器，"
+                    "且都处于 running 状态，没有端口冲突，依赖也都在跑。\n"
+                    "  注意：这只说明「它们现在是起来的」，不说明服务是健康的 —— "
+                    "接口能不能正常响应请用 check_service 探测。"
+                ),
+            )
+        )
+    )
+
+    parts.append(
+        "下一步建议：如果上面的结论里提到了某个容器（尤其是「已退出」或「反复重启」的），"
+        "用 check_container_logs 读它的日志 —— 退出码只能说明「怎么死的」，"
+        "日志才能说明「为什么死」。"
+    )
+    parts.append(_CONFIG_SECURITY_NOTE)
+
+    return _truncate("\n\n".join(parts), limit)
+
+
+@tool
+async def diagnose_startup(path: str = "", timeout: float = _DEFAULT_TIMEOUT) -> str:
+    """分析一个项目为什么起不来：把配置和 Docker 实际状态对起来看（第 6 个工具）。
+
+    **只读**：读配置文件 + 通过 Docker socket 发 GET 请求，不修改任何配置，
+    不执行任何启动、停止或重启命令。
+
+    做的事：读 ``docker-compose.yml`` 得到"应该跑哪些服务、暴露哪些端口、
+    依赖谁"，再读 Docker 的容器列表和状态，比对出下面这些启动失败原因：
+
+    - 服务未启动：compose 里声明了，但 Docker 里根本没有对应容器；
+    - 容器已退出 / 反复重启，并给出退出码和它的常见含义；
+    - 依赖服务不可用：``depends_on`` 指向的服务没在跑，或健康检查是 unhealthy；
+    - 宿主机端口已被别的容器占用；
+    - 配置层面的问题（缺配置文件、变量没定义等），和 check_config 用的是同一套检查。
+
+    和另外两个工具的分工：``check_project`` 看目录结构，``check_service`` 探接口，
+    ``check_container_logs`` 看日志内容，本工具回答的是**"为什么起不来"**。
+    它只给出线索，不代替日志 —— 报告末尾会指名该去看哪个容器的日志。
+
+    Args:
+        path: 项目目录的绝对路径（里面要有 docker-compose.yml），
+              例如 "/ops/projects/AgentHub"。留空则检查允许的根目录下的
+              第一个可用目录。
+        timeout: 单次 Docker API 请求的超时秒数，默认 5 秒（限制在 0.5~15 秒）。
+
+    Returns:
+        中文分析报告：compose 声明的服务 / 实际容器状态 /
+        按严重程度排序的启动问题（证据 / 可能原因 / 处理建议）/ 下一步建议。
+    """
+
+    raw_path = path or ""
+    if not raw_path.strip():
+        roots = _configured_roots()
+        usable = next((r for r in roots if r.is_dir()), None)
+        if usable is None:
+            return _list_roots()
+        raw_path = str(usable)
+
+    resolved, error = _resolve_allowed_path(raw_path)
+    if resolved is None:
+        return _config_scope_error("【启动问题分析】", raw_path, error)
+
+    if not resolved.is_dir():
+        return _truncate(
+            f"【启动问题分析】{resolved}\n"
+            "总体状态：已拒绝\n"
+            f"原因：{'目录不存在。' if not resolved.exists() else '该路径不是目录。'}\n"
+            "处理建议：用 check_project 不带参数调用一次，确认项目目录的准确路径。"
+        )
+
+    timeout = _clamp_timeout(timeout)
+    dotenv, compose_files, present, notes, gitignore = _collect_config_files(resolved)
+
+    if not compose_files:
+        return _truncate(
+            f"【启动问题分析】{resolved}\n"
+            "总体状态：无法分析\n"
+            "检查证据：这个目录（及其下一级子目录）里没有 docker-compose.yml / compose.yml。\n"
+            "可能原因：① 路径不是项目根目录；② 项目不用 compose 编排"
+            "（可能是直接 docker run，或用了 k8s / systemd）。\n"
+            "处理建议：① 用 check_project 看看目录结构；"
+            "② 不用 compose 的项目改用 check_docker 看容器状态、"
+            "check_container_logs 看日志。"
+        )
+
+    # 只分析根目录那一份 compose：一个仓库里有多份时，根目录那份是主入口。
+    label = "docker-compose.yml" if "docker-compose.yml" in compose_files else sorted(compose_files)[0]
+    compose = parse_compose(compose_files[label], label=label)
+
+    config_findings: list[Any] = []
+    notes = list(notes)
+    try:
+        config_findings = audit(
+            dotenv_files=dotenv,
+            compose_files={label: compose_files[label]},
+            present_files=present,
+            required_keys=get_settings().ops_required_env_list,
+            gitignore=gitignore,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("diagnose_startup audit failed for %s: %s", resolved, exc)
+        notes.append(f"配置检查阶段出错（{type(exc).__name__}），本次只做容器状态分析。")
+
+    socket_path = get_settings().OPS_DOCKER_SOCKET
+    if not Path(socket_path).exists():
+        return _render_startup_report(
+            resolved,
+            label,
+            config_findings,
+            scope="配置检查完成，但无法分析容器状态",
+            notes=notes
+            + [
+                f"容器内不存在 Docker socket（{socket_path}），无法获取容器的实际状态。",
+                "下面的结论**只来自配置文件**，不能说明服务当前是不是在运行。",
+            ],
+            compose_names=sorted(compose.services),
+            container_lines=[
+                "  （无法读取：Docker socket 不存在）",
+                "  修复：在 docker-compose.yml 的 backend 服务下加入 "
+                "`- /var/run/docker.sock:/var/run/docker.sock:ro`，然后重启 backend 容器。",
+            ],
+        )
+
+    containers, error = await _docker_api(socket_path, "/containers/json?all=1", timeout)
+    if error:
+        return _render_startup_report(
+            resolved,
+            label,
+            config_findings,
+            scope="配置检查完成，但无法分析容器状态",
+            notes=notes
+            + [
+                f"读取 Docker 容器列表失败：{error}",
+                "下面的结论**只来自配置文件**，不能说明服务当前是不是在运行。",
+            ],
+            compose_names=sorted(compose.services),
+            container_lines=["  （无法读取：Docker 守护进程不可用）"],
+        )
+
+    if not isinstance(containers, list):
+        containers = []
+
+    inspect, inspect_notes = await _inspect_containers(socket_path, containers, timeout)
+    notes.extend(inspect_notes)
+
+    container_lines: list[str] = []
+    for service in compose.services.values():
+        found = match_container(service, containers)
+        if found is None:
+            container_lines.append(f"  ✗ {service.name} → 没有对应容器")
+            continue
+        state = found.get("State", "unknown")
+        mark = "✓" if str(state).lower() == "running" else "✗"
+        status_text = str(found.get("Status", ""))
+        detail = ""
+        info = inspect.get(container_name_of(found)) or {}
+        state_info = info.get("State") if isinstance(info, Mapping) else None
+        if isinstance(state_info, Mapping):
+            code = state_info.get("ExitCode")
+            if code is not None:
+                detail = f"，退出码 {code}"
+            if state_info.get("OOMKilled"):
+                detail += "，OOMKilled=true"
+        restart_count = info.get("RestartCount") if isinstance(info, Mapping) else None
+        if isinstance(restart_count, int) and restart_count > 0:
+            detail += f"，重启过 {restart_count} 次"
+        container_lines.append(
+            f"  {mark} {service.name} → {container_name_of(found)}"
+            f" [{state}{detail}]  {status_text}"
+        )
+
+    try:
+        findings = check_startup(compose, containers, inspect=inspect)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("check_startup failed for %s: %s", resolved, exc)
+        notes.append(f"启动状态比对出错（{type(exc).__name__}），以下只有配置层面的结论。")
+        findings = []
+
+    # 配置类结论排在启动类结论后面：用户问的是"为什么起不来"，
+    # 容器状态的证据比配置文件的一行差异更直接。
+    combined = list(findings) + list(config_findings)
+
+    # 启动类问题会点名容器，配置类问题不会 —— 说清楚合并的规则，避免误读。
+    if findings and config_findings:
+        notes.append(
+            f"结论分两部分：前 {len(findings)} 条来自容器实际状态，"
+            f"后 {len(config_findings)} 条来自配置文件的静态检查。"
+        )
+
+    return _render_startup_report(
+        resolved,
+        label,
+        combined,
+        scope=(
+            f"发现 {sum(1 for f in combined if f.severity == '严重')} 项严重问题"
+            if combined
+            else "未发现启动问题"
+        ),
+        notes=notes,
+        compose_names=sorted(compose.services),
+        container_lines=container_lines,
+    )
+
+
 # ── 供 ``app.agents.supervisor`` 和测试使用的公开入口 ───────────────────────
 
 OPS_TOOLS: tuple[Any, ...] = (
@@ -1364,4 +2070,6 @@ OPS_TOOLS: tuple[Any, ...] = (
     check_docker,
     check_service,
     check_container_logs,
+    check_config,
+    diagnose_startup,
 )

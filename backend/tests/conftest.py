@@ -42,6 +42,9 @@ def _fake_settings(
     log_tail_default=100,
     log_tail_max=500,
     log_max_chars=6000,
+    required_env=(),
+    config_max_file_kb=256,
+    config_max_chars=6000,
 ):
     """Build an object shaped like the parts of Settings the ops tools use."""
     return SimpleNamespace(
@@ -55,6 +58,10 @@ def _fake_settings(
         OPS_LOG_MAX_OUTPUT_CHARS=log_max_chars,
         # 真实 Settings 里这个属性已经转成了小写，这里保持一致
         ops_log_containers_list=[c.lower() for c in log_containers],
+        # 配置检查工具用到的几项
+        ops_required_env_list=list(required_env),
+        OPS_CONFIG_MAX_FILE_KB=config_max_file_kb,
+        OPS_CONFIG_MAX_OUTPUT_CHARS=config_max_chars,
     )
 
 
@@ -156,6 +163,23 @@ FAKE_CONTAINERS = [
 ]
 
 
+# ``GET /containers/{id}/json`` 的返回内容：启动分析从这里拿退出码、
+# OOM 标记和重启次数 —— 这些在 /containers/json 里是没有的。
+FAKE_CONTAINER_INSPECT = {
+    "3333333333333333": {
+        "Id": "3333333333333333",
+        "Name": "/legacy-worker",
+        "State": {
+            "Status": "exited",
+            "Running": False,
+            "ExitCode": 1,
+            "OOMKilled": False,
+        },
+        "RestartCount": 0,
+    },
+}
+
+
 def docker_log_frame(text: str, stream: int = 1) -> bytes:
     """构造一帧 Docker 复用日志流：8 字节头（类型 + 保留位 + 大端长度）+ 内容。
 
@@ -185,14 +209,25 @@ FAKE_LOG_TEXT = "\n".join(
 
 
 def _make_docker_app(state: dict) -> web.Application:
-    """搭建假的 Docker Engine API（/version、/containers/json、/containers/{name}/logs）。"""
+    """搭建假的 Docker Engine API。
+
+    路由：``/version``、``/containers/json``、``/containers/{name}/logs``、
+    ``/containers/{id}/json``（启动分析用，拿退出码和 OOM 标记）。
+    """
 
     async def version(request):
         return web.json_response(FAKE_DOCKER_VERSION)
 
     async def containers(request):
         assert request.query.get("all") == "1"  # 工具必须连已停止的容器一起列出
-        return web.json_response(FAKE_CONTAINERS)
+        return web.json_response(state["containers"])
+
+    async def inspect(request):
+        state["last_inspect"] = request.match_info["id"]
+        data = state["inspect"].get(state["last_inspect"])
+        if data is None:
+            return web.json_response({"message": "No such container"}, status=404)
+        return web.json_response(data)
 
     async def logs(request):
         # 记下这次请求，测试可以据此断言 tail / since / timestamps 传得对不对
@@ -209,6 +244,7 @@ def _make_docker_app(state: dict) -> web.Application:
     app = web.Application()
     app.router.add_get("/version", version)
     app.router.add_get("/containers/json", containers)
+    app.router.add_get("/containers/{id}/json", inspect)
     app.router.add_get("/containers/{name}/logs", logs)
     return app
 
@@ -229,6 +265,11 @@ async def docker_api(tmp_path):
         "log_status": 200,
         "last_container": "",
         "last_logs_query": {},
+        # 启动分析（diagnose_startup）用：容器列表可被测试整体替换，
+        # inspect 按容器 ID 返回详情。
+        "containers": FAKE_CONTAINERS,
+        "inspect": FAKE_CONTAINER_INSPECT,
+        "last_inspect": "",
     }
 
     runner = web.AppRunner(_make_docker_app(state))
