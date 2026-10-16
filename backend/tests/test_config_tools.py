@@ -568,8 +568,10 @@ def test_audit_flags_real_secret_in_template():
 
 
 def test_audit_flags_concrete_secret_value_in_template():
+    # 这里刻意用一个"编造的"具体值：既不能是占位符（那样就不该报），
+    # 也不能抄真实部署里的密钥 —— 测试用例会进版本库，抄真值等于二次泄露。
     findings = run_audit(
-        dotenv_files={"backend/.env.example": "API_KEY_ENCRYPTION_KEY=AgentHub2026SecureKey\n"},
+        dotenv_files={"backend/.env.example": "API_KEY_ENCRYPTION_KEY=LocalDevOnlyKey2026Xyz\n"},
         gitignore=HEALTHY_GITIGNORE,
     )
 
@@ -581,7 +583,7 @@ def test_audit_flags_concrete_secret_value_in_template():
 @pytest.mark.parametrize(
     "value",
     [
-        "your-jwt-secret-key-change-this-in-production",
+        "your-secret-key-please-replace",
         "changeme",
         "<your-api-key>",
         "sk-abcdefghijklmnop***********",
@@ -1582,6 +1584,130 @@ async def test_diagnose_startup_notes_inspect_limit(configure_ops, tmp_path, doc
     report = await diagnose_startup.ainvoke({"path": str(project)})
 
     assert "只额外查询了前 6 个" in report
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 9.5 验收回归 —— 代码审查确认的缺陷，逐条钉住
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def test_parse_compose_survives_deeply_nested_yaml():
+    """500 层嵌套会让 PyYAML 抛 ``RecursionError``，**不是** ``yaml.YAMLError``。
+
+    实测约 1KB 就能触发，远低于 ``OPS_CONFIG_MAX_FILE_KB`` 上限 ——
+    不单独接住的话，一份畸形 compose 就能让整个工具以原始异常结束。
+    """
+    nested = "a: " + "[" * 500 + "]" * 500
+
+    parsed = cc.parse_compose(nested, label="docker-compose.yml")
+
+    assert parsed.problems
+    assert "嵌套层级过深" in parsed.problems[0]
+    assert parsed.services == {}
+
+
+def test_parse_dotenv_never_echoes_non_keyvalue_line():
+    """没有 ``=`` 的行无法判断是不是密钥，所以只报行号和长度、不回显内容。"""
+    parsed = cc.parse_dotenv("my-secret-token: abc123\n", label="backend/.env")
+
+    assert len(parsed.problems) == 1
+    problem = parsed.problems[0]
+    assert "第 1 行" in problem
+    assert "长度" in problem
+    assert "my-secret-token" not in problem
+    assert "abc123" not in problem
+
+
+def test_parse_dotenv_never_echoes_private_key_body():
+    """PEM 私钥上下两行没有 ``=``，会被当成"格式错误行"，绝不能原文回显。"""
+    pem = (
+        "-----BEGIN RSA PRIVATE KEY-----\n"
+        "-----END RSA PRIVATE KEY-----\n"
+    )
+
+    parsed = cc.parse_dotenv(pem, label="backend/.env")
+    joined = "\n".join(parsed.problems)
+
+    assert len(parsed.problems) == 2
+    assert "PRIVATE KEY" not in joined
+    assert "-----" not in joined
+
+
+def test_parse_dotenv_never_echoes_invalid_key_name():
+    """键名不合法时同样不回显 —— base64 正文行会走到这个分支。"""
+    parsed = cc.parse_dotenv("1BADKEY=whatever\n", label="backend/.env")
+
+    assert parsed.problems
+    assert "键名不合法" in parsed.problems[0]
+    assert "1BADKEY" not in parsed.problems[0]
+    assert "长度 7" in parsed.problems[0]
+
+
+def test_find_interpolations_treats_error_operator_as_no_default():
+    """``:?`` / ``?`` 是"未定义就报错"，不是兜底默认值 —— 正是最该报的那类。"""
+    found = cc.find_interpolations(
+        "a: ${MUST_HAVE:?缺少就报错}\nb: ${OK:-fallback}\nc: ${PLAIN}\n"
+    )
+
+    assert found["MUST_HAVE"] is False
+    assert found["OK"] is True
+    assert found["PLAIN"] is False
+
+
+@pytest.mark.parametrize(
+    ("entry", "expected"),
+    [
+        ("8080:80", 8080),
+        ("127.0.0.1:8080:80", 8080),
+        ("[::1]:8080:80", 8080),
+        ("[::]:9000:80", 9000),
+    ],
+)
+def test_parse_port_entry_accepts_ipv6_host(entry, expected):
+    """IPv6 宿主机要写成 ``[::1]``，冒号在方括号里，不能按冒号硬切。"""
+    port, problem = cc._parse_port_entry(entry)
+
+    assert port == expected
+    assert problem == ""
+
+
+def test_parse_port_entry_rejects_unclosed_ipv6_bracket():
+    port, problem = cc._parse_port_entry("[::1:8080:80")
+
+    assert port is None
+    assert "右方括号" in problem
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    ["prod.env", "config/prod.env", "*.env.example", ".env.*", "node_modules/"],
+)
+def test_gitignore_patterns_that_do_not_cover_env(pattern):
+    """这些写法盖不住 ``.env``，不能算"已忽略" —— 漏报比误报危险。"""
+    assert cc._gitignore_covers_env(f"{pattern}\n") is False
+
+
+def test_check_config_skips_symlink_pointing_outside_root(configure_ops, tmp_path):
+    """根目录里指向外部的软链接，不能把白名单之外的 .env 读进来。"""
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / ".env").write_text("LEAKED_TOKEN=should-not-be-read\n", encoding="utf-8")
+
+    link = root / "proj"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError:  # pragma: no cover - 平台不允许建软链接
+        pytest.skip("当前平台不允许创建目录软链接")
+
+    configure_ops(roots=[root])
+
+    report = check_config.invoke({"path": str(root)})
+
+    assert "should-not-be-read" not in report
+    # 软链接本身也要在报告里说明被跳过了，而不是静默消失
+    assert "指向项目根目录之外" in report
 
 
 # ══════════════════════════════════════════════════════════════════════════

@@ -255,7 +255,13 @@ def parse_dotenv(text: str, *, label: str = ".env") -> DotenvFile:
             stripped = stripped[len("export") :].lstrip()
 
         if "=" not in stripped:
-            problems.append(f"第 {number} 行不是 KEY=VALUE 形式，这一行会被忽略：{_clip(stripped)}")
+            # 这一行既然不是 KEY=VALUE，就无法判断它是不是密钥 ——
+            # 而 PEM 私钥正文、`token: xxx` 这类写法恰好都落在这里。
+            # 所以只报行号和长度，绝不回显内容：报告是要给模型和接口看的。
+            problems.append(
+                f"第 {number} 行不是 KEY=VALUE 形式，这一行会被忽略"
+                f"（长度 {len(stripped)}，内容已隐藏）。"
+            )
             continue
 
         key, _, value = stripped.partition("=")
@@ -266,8 +272,10 @@ def parse_dotenv(text: str, *, label: str = ".env") -> DotenvFile:
             problems.append(f"第 {number} 行缺少键名（= 左边是空的）。")
             continue
         if not _ENV_KEY_RE.match(key):
+            # 同样不回显：base64 结尾带 `=` 的私钥正文行会走到这里，
+            # 那串"键名"其实就是密钥内容本身。
             problems.append(
-                f"第 {number} 行的键名不合法：{_clip(key)}"
+                f"第 {number} 行的键名不合法（长度 {len(key)}，内容已隐藏）"
                 "（只允许字母、数字、下划线、点，且不能以数字开头）。"
             )
 
@@ -314,13 +322,17 @@ def find_interpolations(text: str) -> dict[str, bool]:
 
     带 ``:-`` / ``-`` 默认值的变量，即使环境里没有也能启动；
     不带的会被 Compose 替换成空字符串 —— 这个区别是判断"配置缺失"的关键。
+
+    注意 ``:?`` / ``?``（未定义就报错）**不算**有默认值：它们不仅不提供兜底，
+    还会让 compose 直接启动失败，正是本函数最该标出来的那类。
     """
     found: dict[str, bool] = {}
     for match in _INTERP_RE.finditer(text or ""):
         name = match.group(1) or match.group(4)
         if not name:
             continue
-        has_default = bool(match.group(1)) and match.group(2) is not None
+        # group(2) 是操作符：``-`` 提供默认值，``?`` 是"未定义就报错"。
+        has_default = bool(match.group(1)) and match.group(2) == "-"
         # 同一个变量出现多次时，只要有一次带默认值就算"有兜底"。
         found[name] = found.get(name, False) or has_default
     return found
@@ -389,6 +401,15 @@ def _parse_port_entry(entry: str) -> tuple[int | None, str]:
         return None, "端口映射是空字符串。"
     if "${" in text or "$" in text:
         return None, ""  # 变量插值，运行期才能确定，不猜
+
+    # 宿主机可以写成 IPv6，此时必须用 ``[::1]`` 包起来 ——
+    # 冒号在方括号内部，直接 split(":") 会把它切成 5 段而误判成格式错误。
+    # 所以先摘掉方括号那段，再按冒号切剩下的 ``[宿主端口:]容器端口``。
+    if text.startswith("["):
+        close = text.find("]")
+        if close == -1:
+            return None, f"端口映射 {_clip(text)} 的 IPv6 地址缺少右方括号。"
+        text = text[close + 1 :].lstrip(":")
 
     parts = text.split(":")
     if len(parts) == 1:  # "8080" —— 只写容器端口，宿主端口随机
@@ -494,6 +515,15 @@ def parse_compose(text: str, *, label: str = "docker-compose.yml") -> ComposeFil
         return ComposeFile(
             label=label,
             problems=(f"YAML 解析失败（{where}）：{_clip(detail)}",),
+            interpolations=interpolations,
+        )
+    except RecursionError:
+        # 深度嵌套（如 ``a: [[[[...``）会让 PyYAML 递归爆栈，
+        # 抛的是 RecursionError 而不是 YAMLError —— 实测 500 层、约 1KB 就能触发。
+        # 不接住的话异常会直接冲出工具，前面承诺的"解析失败不抛异常"就失效了。
+        return ComposeFile(
+            label=label,
+            problems=("YAML 嵌套层级过深，解析时栈溢出，无法读取该文件。",),
             interpolations=interpolations,
         )
 
@@ -1026,10 +1056,14 @@ def _gitignore_covers_env(text: str) -> bool:
         patterns.add(line.lstrip("/").rstrip("/"))
     if not patterns:
         return False
-    if ".env" in patterns or ".env*" in patterns or "*.env" in patterns:
-        return True
-    # ``*.env.*`` / ``.env.*`` 也能盖住 .env.local 之类的文件
-    return any(p.startswith(".env") or p.endswith(".env") or ".env." in p for p in patterns)
+    for p in patterns:
+        # 只看规则的最后一段：``backend/.env`` 盖的是 backend 下的 .env，
+        # 而 ``config/prod.env`` 盖的是 prod.env，跟 .env 没关系 ——
+        # 之前用 p.endswith(".env") 会把后者也算成覆盖，属于漏报。
+        base = p.rsplit("/", 1)[-1]
+        if base in (".env", ".env*", "*.env", ".*", "*"):
+            return True
+    return False
 
 
 def _check_env_not_ignored(

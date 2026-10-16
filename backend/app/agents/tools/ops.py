@@ -133,9 +133,11 @@ _METADATA_HOSTS = frozenset(
 _SECRET_PATTERN = re.compile(
     r"(?i)\b(api[_-]?key|secret|token|password|passwd|authorization|access[_-]?key|"
     r"private[_-]?key|credential)"
-    r"(\"?\s*[:=]\s*\"?)"
+    r"(\s*[:=]\s*)"
     r"((?:bearer|basic)\s+)?"  # 保留 Bearer/Basic 这种前缀，只把后面的值打码
-    r"([^\s\"',}]{2,})"
+    # 引号里的值可能含空格（``password="my secret pass"``），必须整段吃掉；
+    # 以前只匹配到第一个空格为止，等于把口令的后半截原样留在报告里。
+    r"(\"[^\"]{1,}\"|'[^']{1,}'|[^\s\"',}]{2,})"
 )
 # 脱敏用正则 2：没有 ``key:`` 前缀、光秃秃的 ``Bearer <token>``。
 _BEARER_PATTERN = re.compile(r"(?i)\b(bearer|basic)\s+([A-Za-z0-9._~+/=-]{8,})")
@@ -1480,6 +1482,16 @@ def _collect_config_files(
             and not entry.name.startswith((".", "_"))
             and entry.name not in _SKIP_DIRS
         ):
+            # ``is_dir()`` 会跟随软链接：根目录里一个指向别处的软链接
+            # （名字又不以 . / _ 开头）能把白名单根目录之外的 .env 读进来。
+            # 所以解析真实路径后，还要再确认它仍在根目录之内。
+            try:
+                resolved = entry.resolve()
+            except OSError:
+                continue
+            if not _is_within(resolved, root):
+                notes.append(f"{entry.name}/ 指向项目根目录之外，已跳过。")
+                continue
             dirs.append(entry)
     if len(dirs) > _MAX_CONFIG_DIRS:
         notes.append(

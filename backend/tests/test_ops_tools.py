@@ -554,3 +554,48 @@ async def test_agent_runs_check_project_tool_end_to_end(configure_ops, tmp_path)
     assert "总体状态：正常" in tool_outputs[0]
     assert "Python 项目" in tool_outputs[0]
     assert result["messages"][-1].content == "检查完成，服务正常。"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 7. _redact —— 脱敏（验收回归）
+# ══════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.parametrize(
+    ("raw", "must_not_appear"),
+    [
+        ('password="my secret pass"', "my secret pass"),
+        ("secret = 'a b c'", "a b c"),
+        ("password='hunter2 with spaces'", "hunter2 with spaces"),
+        ('api_key="sk-abcdefghijklmnop"', "sk-abcdefghijklmnop"),
+    ],
+)
+def test_redact_masks_whole_quoted_secret(raw, must_not_appear):
+    r"""引号里的密钥可能含空格。
+
+    以前的值分组是 ``[^\s\"',}]{2,}``，遇到空格就停 ——
+    ``password="my secret pass"`` 只会被打成 ``password="*** secret pass"``，
+    等于把口令的后半截原样留在报告里。
+    """
+    from app.agents.tools import ops as ops_module
+
+    result = ops_module._redact(raw)
+
+    assert must_not_appear not in result
+    assert "***" in result
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "api_key=abc123def456",
+        "token: short",
+        "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9",
+        "api_key=abc, other=1",
+    ],
+)
+def test_redact_still_masks_ordinary_secrets(raw):
+    """常见写法的脱敏不能被上面的改动破坏。"""
+    from app.agents.tools import ops as ops_module
+
+    assert "***" in ops_module._redact(raw)
