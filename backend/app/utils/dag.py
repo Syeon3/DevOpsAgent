@@ -65,8 +65,9 @@ class DagBuilder:
         Args:
             thread_id: The thread ID.
             before_checkpoint_id: Checkpoint ID before this turn started.
-                Used to determine if this is a continuation.
+                Used to locate the per-turn slice in checkpoint history.
             before_message_count: Number of messages before this turn started.
+                Fallback when checkpoint history is unavailable.
             reasoning_segments: Dict mapping AIMessage.id to reasoning content.
                 Used to inject thinking into each AI node in the DAG when
                 checkpointer doesn't preserve reasoning content.
@@ -76,13 +77,21 @@ class DagBuilder:
         """
         config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
 
-        # Get final state to find all messages in this turn
-        state = await self.agent.aget_state(config)
-        all_messages: list = state.values.get("messages", [])
-        new_messages = all_messages[before_message_count:]
+        new_messages = await self._get_turn_messages(
+            config,
+            thread_id,
+            before_checkpoint_id,
+            before_message_count,
+        )
 
         if not new_messages:
-            logger.warning("No messages found for thread=%s", thread_id)
+            logger.warning(
+                "No messages found for thread=%s "
+                "(before_checkpoint_id=%s, before_message_count=%d)",
+                thread_id,
+                before_checkpoint_id,
+                before_message_count,
+            )
             return ExecutionDag(
                 thread_id=thread_id,
                 nodes=[],
@@ -101,6 +110,101 @@ class DagBuilder:
             total_steps=len(nodes),
             steps=[n.step for n in nodes],
         )
+
+    async def _get_turn_messages(
+        self,
+        config: RunnableConfig,
+        thread_id: str,
+        before_checkpoint_id: str | None,
+        before_message_count: int,
+    ) -> list:
+        """取回本轮新增的消息（按执行顺序）。
+
+        为什么不能只按条数切片：``SummarizationMiddleware`` 在上下文超限时会用
+        ``[RemoveMessage(REMOVE_ALL_MESSAGES), 摘要, 最近 N 条]`` 重写整个消息
+        列表，最终状态的消息数可能不增反减，``messages[before_message_count:]``
+        于是切出空列表。
+
+        优先从 checkpoint 历史还原 —— 被摘要从最新状态里删掉的消息，仍然保存
+        在更早的 checkpoint 中；历史不可用时再退回按条数切片。
+        """
+        if before_checkpoint_id:
+            try:
+                messages = await self._collect_messages_from_history(
+                    config, thread_id, before_checkpoint_id
+                )
+                if messages:
+                    return messages
+            except Exception as e:
+                logger.warning(
+                    "Failed to rebuild turn messages from checkpoint history "
+                    "for thread=%s: %s",
+                    thread_id,
+                    e,
+                )
+
+        # 回退：首次对话、短对话或历史不可用时，按条数切片仍然正确
+        state = await self.agent.aget_state(config)
+        return state.values.get("messages", [])[before_message_count:]
+
+    async def _collect_messages_from_history(
+        self,
+        config: RunnableConfig,
+        thread_id: str,
+        before_checkpoint_id: str,
+    ) -> list:
+        """遍历 checkpoint 历史，收集本轮新增的消息。
+
+        步骤：
+        1. 读取本轮开始前的 checkpoint，用它的消息 id 作为"旧消息"集合；
+        2. 从最新往回遍历快照，直到这个 checkpoint（不含）；
+        3. 按"首次出现"顺序收集新消息，摘要消息跳过。
+
+        消息在状态里只会追加，因此"首次出现"的先后就是执行顺序；中途被摘要
+        删掉也不影响这个顺序。
+        """
+        before_config: RunnableConfig = {
+            "configurable": {
+                "thread_id": thread_id,
+                "checkpoint_id": before_checkpoint_id,
+            }
+        }
+        before_state = await self.agent.aget_state(before_config)
+        before_ids = {
+            _message_key(m) for m in before_state.values.get("messages", [])
+        }
+
+        snapshots: list = []
+        async for snapshot in self.agent.aget_state_history(config):
+            checkpoint_id = snapshot.config.get("configurable", {}).get(
+                "checkpoint_id"
+            )
+            if checkpoint_id == before_checkpoint_id:
+                break
+            snapshots.append(snapshot)
+        else:
+            # 历史被裁剪，找不到本轮起点 —— 交给调用方回退
+            logger.debug(
+                "Checkpoint %s not found in history for thread=%s",
+                before_checkpoint_id,
+                thread_id,
+            )
+            return []
+
+        messages: list = []
+        seen: set[str] = set()
+        # 快照是新 → 旧遍历的，反过来按执行顺序收集
+        for snapshot in reversed(snapshots):
+            for message in snapshot.values.get("messages", []):
+                if _is_summary_message(message):
+                    continue
+                key = _message_key(message)
+                if key in before_ids or key in seen:
+                    continue
+                seen.add(key)
+                messages.append(message)
+
+        return messages
 
     def _build_dag_from_messages(
         self,
@@ -395,6 +499,27 @@ class DagBuilder:
             message_type="tool",
             step=step,
         )
+
+
+def _message_key(message) -> str:
+    """消息去重键：优先用 id；极少数没有 id 的消息退化为内容指纹。"""
+    message_id = getattr(message, "id", None)
+    if message_id:
+        return str(message_id)
+    content = (
+        message.content if isinstance(message.content, str) else str(message.content)
+    )
+    return f"{type(message).__name__}:{hash(' '.join(content.split())[:200])}"
+
+
+def _is_summary_message(message) -> bool:
+    """判断是否为 SummarizationMiddleware 注入的摘要消息。
+
+    该中间件把摘要包装成 HumanMessage，并带上 ``lc_source="summarization"``。
+    它不是用户输入，不能作为执行步骤展示。
+    """
+    kwargs = getattr(message, "additional_kwargs", None) or {}
+    return kwargs.get("lc_source") == "summarization"
 
 
 def _convert_content_to_string(content) -> str:
